@@ -12,8 +12,8 @@ class TrueAPI:
         self.base_url = base_url
         self.token = None
         self.headers = {
-            'Content-Type': 'application/json; charset=utf-8',
-            'cache-control': 'no-cache'
+            'Content-Type': 'application/json',
+            'Authorization': f'Bearer {self.token}'
         }
         self.driver = webdriver.Chrome()  # Убедитесь, что у вас установлен ChromeDriver
 
@@ -82,10 +82,6 @@ class TrueAPI:
             # Ждем появления диалога для ввода PIN-кода
             time.sleep(30)  # Даем время для появления диалога
 
-            # Вводим PIN-код (ВНИМАНИЕ: Это небезопасно!)
-            PIN_CODE = "53753734"  # Замените на реальный PIN-код
-            self.driver.switch_to.active_element.send_keys(PIN_CODE + Keys.ENTER)
-
             # Ждем, пока появится подписанный документ
             WebDriverWait(self.driver, 30).until(
                 EC.presence_of_element_located((By.NAME, "pkcs7"))
@@ -97,16 +93,75 @@ class TrueAPI:
 
             return signed_data
 
+    def get_balance(self):
+        """
+        Получение баланса УОТ по всем ТГ.
+        """
+        url = f"{self.base_url}/elk/product-groups/balance/all"
+        response = requests.get(url, headers=self.headers)
+        
+        if response.status_code == 200:
+            balances = response.json()
+            return balances
+        else:
+            print(f"Ошибка при получении баланса. Код ошибки: {response.status_code}")
+            print(f"Сообщение об ошибке: {response.text}")
+            return None
+
     def __del__(self):
-        if self.driver:
+        if hasattr(self, 'driver'):
             self.driver.quit()
 
-# Пример использования
-if __name__ == "__main__":
-    api = TrueAPI('https://aslbelgisi.uz/api/v3/true-api')  # Замените на реальный URL API
+def get_name_product_group(product_group_id):
+    match product_group_id:
+        case 3:
+            return "Табачная продукция"
+        case 7:
+            return "Лекарственные средства"
+        case 11:
+            return "Алкогольная продукция"
+        case 13:
+            return "Вода и прохладительные напитки"
+        case 15:
+            return "Пиво и пивные напитки"
+        case 18:
+            return "Бытовая техника"
+        case 19:
+            return "Спиртосодержащая непищевая продукция"
+
+def print_balance(balances):
+    """
+    Вывод информации о балансе в консоль.
+    """
+    if not balances:
+        print("Нет данных о балансе.")
+        return
+
+    print("Баланс по товарным группам:")
+    for balance in balances:
+        org_id = balance.get('organisationId', 'Не указан')
+        product_group_id = get_name_product_group(balance.get('productGroupId', 'Не указан'))
+        balance_amount = balance.get('balance', 'Не указан')
+        contract_id = balance.get('contractId', 'Не указан')
+
+        print("--------------------")
+        print(f"Организация ID: {org_id}")
+        print(f"Товарная группа ID: {product_group_id}")
+        print(f"Баланс: {balance_amount if balance_amount != 'Не указан' else 'Не указан'} тийин")
+        print(f"Контракт ID: {contract_id}")
+        print("--------------------")
+
+def main():
+    api = TrueAPI('https://aslbelgisi.uz/api/v3/true-api')
     
     try:
         token = api.authenticate()
         print(f"Успешная аутентификация. Полученный токен: {token}")
+        balances = api.get_balance()
+        print_balance(balances)
     except Exception as e:
         print(f"Ошибка при аутентификации: {str(e)}")
+
+
+if __name__ == "__main__":
+    main()
