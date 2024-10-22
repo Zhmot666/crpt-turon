@@ -35,8 +35,13 @@ def print_certificates(data):
             print(f"Диск: {cert['disk']}")
             print(f"Путь: {cert['path']}")
             print(f"Имя: {cert['name']}")
-            print(f"Алиас: {cert['alias']}")
+            # print(f"Алиас: {cert['alias']}")
             print("--------------------")
+            list_certificates = cert['alias'].split(',')
+            for certificate in list_certificates:
+                print(certificate)
+            print("--------------------")
+
     else:
         print("Не удалось получить список сертификатов")
 
