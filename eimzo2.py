@@ -13,6 +13,35 @@ class ClientTrueAPI:
         self.token = None
         self.headers = {}
 
+    def get_balance_info(self):
+        url = self.base_url + "/elk/product-groups/balance/all"
+        response = requests.get(url, headers=self.current_token)
+        
+        if response.status_code == 200:
+            balances = response.json()
+            return balances
+        else:
+            # Заменяем вывод в консоль на модальное окно
+            messagebox.showerror("Ошибка", f"Ошибка при получении баланса. Код ошибки: {response.status_code}\nСообщение об ошибке: {response.text}")
+            return None
+
+
+    def update_balance(self):
+        """Обновляет информацию о балансе"""
+        try:
+            balance_data = self.get_balance_info()
+            print("Данные о балансе:", balance_data)
+
+            if balance_data is None:
+                raise Exception("Не удалось получить данные о балансе")
+
+            self.balance_labels['balance'].config(text=f"Баланс: {balance_data['balance']}")
+            self.balance_labels['reserved'].config(text=f"Зарезервировано: {balance_data['reserved']}")
+            self.balance_labels['available'].config(text=f"Доступно: {balance_data['available']}")
+
+        except Exception as e:
+            messagebox.showerror("Ошибка", f"Ошибка при обновлении баланса: {str(e)}")
+
 
 class ClientCryptAPI:
     def __init__(self, base_url):
@@ -21,10 +50,7 @@ class ClientCryptAPI:
     def load_certificates(self):
         """Загружает список сертификатов"""
         try:
-            ws = websocket.create_connection(
-                "wss://127.0.0.1:64443/service/cryptapi",
-                sslopt={"cert_reqs": ssl.CERT_NONE}
-            )
+            ws = websocket.create_connection(self.base_url, sslopt={"cert_reqs": ssl.CERT_NONE})
             
             list_certificates_request = {
                 "plugin": "pfx",
@@ -49,6 +75,10 @@ class CertificateSelector:
         self.root = tk.Tk()
         self.root.title("Подключение к ЭЦП")
         self.root.geometry("800x400")
+        
+        # Инициализация API-клиентов
+        self.true_api_client = ClientTrueAPI("https://aslbelgisi.uz/api/v3/true-api/auth/key")
+        self.crypt_api_client = ClientCryptAPI("http://127.0.0.1:64443/service/cryptapi")
 
         # Фрейм для выбора сертификата
         cert_frame = ttk.LabelFrame(self.root, text="Выбор сертификата", padding=10)
@@ -230,34 +260,6 @@ class CertificateSelector:
             if 'ws' in locals():
                 ws.close()
 
-    def get_balance_info(self):
-        url = f"https://aslbelgisi.uz/api/v3/true-api/elk/product-groups/balance/all"
-        response = requests.get(url, headers=self.current_token)
-        
-        if response.status_code == 200:
-            balances = response.json()
-            return balances
-        else:
-            # Заменяем вывод в консоль на модальное окно
-            messagebox.showerror("Ошибка", f"Ошибка при получении баланса. Код ошибки: {response.status_code}\nСообщение об ошибке: {response.text}")
-            return None
-
-
-    def update_balance(self):
-        """Обновляет информацию о балансе"""
-        # try:
-        balance_data = self.get_balance_info()
-        print("Данные о балансе:", balance_data)
-
-        if balance_data is None:
-            raise Exception("Не удалось получить данные о балансе")
-
-        self.balance_labels['balance'].config(text=f"Баланс: {balance_data['balance']}")
-        self.balance_labels['reserved'].config(text=f"Зарезервировано: {balance_data['reserved']}")
-        self.balance_labels['available'].config(text=f"Доступно: {balance_data['available']}")
-
-        # except Exception as e:
-        #     messagebox.showerror("Ошибка", f"Ошибка при обновлении баланса: {str(e)}")
 
     def run(self):
         """Запускает главный цикл приложения"""
