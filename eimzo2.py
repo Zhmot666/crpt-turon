@@ -1,17 +1,54 @@
 import tkinter as tk
-from tkinter import ttk, scrolledtext
+from tkinter import ttk, scrolledtext, messagebox
 import websocket
 import json
 import ssl
 import re
 import base64
+import requests
 
+class ClientTrueAPI:
+    def __init__(self, base_url):
+        self.base_url = base_url
+        self.token = None
+        self.headers = {}
+
+
+class ClientCryptAPI:
+    def __init__(self, base_url):
+        self.base_url = base_url
+
+    def load_certificates(self):
+        """Загружает список сертификатов"""
+        try:
+            ws = websocket.create_connection(
+                "wss://127.0.0.1:64443/service/cryptapi",
+                sslopt={"cert_reqs": ssl.CERT_NONE}
+            )
+            
+            list_certificates_request = {
+                "plugin": "pfx",
+                "name": "list_all_certificates"
+            }
+            
+            ws.send(json.dumps(list_certificates_request))
+            certificates = json.loads(ws.recv())
+            ws.close()
+
+            if certificates.get("success", False):
+                self.cert_list = certificates.get("certificates", [])
+                self.fill_combobox()
+            else:
+                messagebox.showerror("Ошибка", "Не удалось загрузить сертификаты")
+        except Exception as e:
+            messagebox.showerror("Ошибка", f"Ошибка при загрузке сертификатов: {str(e)}")
+            
 
 class CertificateSelector:
     def __init__(self):
         self.root = tk.Tk()
-        self.root.title("Подписание документа ЭЦП")
-        self.root.geometry("800x600")
+        self.root.title("Подключение к ЭЦП")
+        self.root.geometry("800x400")
 
         # Фрейм для выбора сертификата
         cert_frame = ttk.LabelFrame(self.root, text="Выбор сертификата", padding=10)
@@ -27,113 +64,106 @@ class CertificateSelector:
         )
         self.combo.pack(fill="x")
 
-        # Фрейм для ввода текста
-        input_frame = ttk.LabelFrame(self.root, text="Текст для подписи", padding=10)
-        input_frame.pack(fill="both", expand=True, padx=10, pady=5)
-
-        # Поле ввода текста
-        self.input_text = scrolledtext.ScrolledText(
-            input_frame, 
-            wrap=tk.WORD, 
-            height=8
+        # Кнопка подключения
+        self.connect_button = ttk.Button(
+            self.root,
+            text="Подключиться",
+            command=self.connect_certificate
         )
-        self.input_text.pack(fill="both", expand=True)
+        self.connect_button.pack(pady=10)
 
-        # Кнопка подписания
-        self.sign_button = ttk.Button(
-            self.root, 
-            text="Подписать", 
-            command=self.sign_text
-        )
-        self.sign_button.pack(pady=10)
+        # рейм для отображения баланса
+        balance_frame = ttk.LabelFrame(self.root, text="Информация о балансе", padding=10)
+        balance_frame.pack(fill="both", expand=True, padx=10, pady=5)
 
-        # Фрейм для вывода результата
-        output_frame = ttk.LabelFrame(self.root, text="Результат подписи", padding=10)
-        output_frame.pack(fill="both", expand=True, padx=10, pady=5)
-
-        # Поле вывода результата
-        self.output_text = scrolledtext.ScrolledText(
-            output_frame, 
-            wrap=tk.WORD, 
-            height=8
-        )
-        self.output_text.pack(fill="both", expand=True)
+        # Метки для отображеня информации о балансе
+        self.balance_labels = {
+            'balance': ttk.Label(balance_frame, text="Баланс: "),
+            'reserved': ttk.Label(balance_frame, text="Зарезервировано: "),
+            'available': ttk.Label(balance_frame, text="Доступно: ")
+        }
+        for label in self.balance_labels.values():
+            label.pack(anchor='w', pady=2)
 
         # Загружаем сертификаты
-        self.certificates = self.load_certificates()
-        if self.certificates:
-            self.fill_combobox()
+        self.cert_list = []
+        self.load_certificates()
 
-    def extract_cn(self, alias):
-        """Извлекает значение CN из строки алиаса"""
-        cn_match = re.search(r'cn=(.*?),', alias)
-        return cn_match.group(1) if cn_match else "Неизвестно"
+        # Добавляем переменные для хранения текущего состояния
+        self.current_key_id = None
+        self.current_cert_data = None
+        self.current_token = None
 
-    def load_certificates(self):
-        """Загружает список сертификатов через WebSocket"""
-        try:
-            ws = websocket.create_connection(
-                "wss://127.0.0.1:64443/service/cryptapi",
-                sslopt={"cert_reqs": ssl.CERT_NONE}
-            )
-            
-            request = {
-                "plugin": "pfx",
-                "name": "list_all_certificates"
-            }
-            
-            ws.send(json.dumps(request))
-            response = ws.recv()
-            ws.close()
-            
-            data = json.loads(response)
-            if data.get("success"):
-                return data.get("certificates", [])
-            else:
-                print("Ошибка получения сертификатов")
-                return None
-                
-        except Exception as e:
-            print(f"Ошибка подключения к E-IMZO: {e}")
-            return None
+        # Кнопка для обновления баланса
+        self.update_balance_button = ttk.Button(
+            self.root,
+            text="Обновить баланс",
+            command=self.update_balance  # Привязываем метод к кнопке
+        )
+        self.update_balance_button.pack(pady=10)
+
+
 
     def fill_combobox(self):
         """Заполняет комбобокс данными сертификатов"""
-        self.cert_list = []  # Сохраняем полные данные сертификатов
-        combo_items = []
-        for cert in self.certificates:
-            name = cert['name']
-            cn = self.extract_cn(cert['alias'])
-            self.cert_list.append(cert)  # Сохраняем полные данные
-            combo_items.append(f"{name} - {cn}")
+        cert_list = []
+        for cert in self.cert_list:
+            alias = cert.get('alias', '').upper()
+            # Зменяем идентификаторы на более читаемые
+            alias = alias.replace("1.2.860.3.16.1.1=", "INN=")
+            alias = alias.replace("1.2.860.3.16.1.2=", "PINFL=")
+            
+            # Извлекаем нужные поля
+            vo = {
+                'serialNumber': self._get_x500_val(alias, "SERIALNUMBER"),
+                'validFrom': self._get_x500_val(alias, "VALIDFROM"),
+                'validTo': self._get_x500_val(alias, "VALIDTO"),
+                'CN': self._get_x500_val(alias, "CN"),
+                'TIN': self._get_x500_val(alias, "INN") or self._get_x500_val(alias, "UID"),
+                'O': self._get_x500_val(alias, "O"),
+                'T': self._get_x500_val(alias, "T")
+            }
+
+            # Формируем строку для отображения
+            display_string = f"{vo['O']} - {vo['CN']} ({vo['TIN']})"
+            cert_list.append(display_string)
         
-        self.combo['values'] = combo_items
-        if combo_items:
-            self.combo.set(combo_items[0])
+        self.combo['values'] = cert_list
+        if cert_list:
+            self.combo.set(cert_list[0])
 
-    def sign_text(self):
-        """Подписывает введенный текст"""
+    def _get_x500_val(self, x500name, field):
+        """Извлекает значение поля из строки X500Name"""
+        field_match = re.search(f"{field}=([^,]+)", x500name)
+        return field_match.group(1) if field_match else ""
+
+    def connect_certificate(self):
+        """Обработчик нажатия кнопки Подключиться"""
         if not self.cert_var.get():
-            self.output_text.delete(1.0, tk.END)
-            self.output_text.insert(tk.END, "Ошибка: Не выбран сертификат")
-            return
-
-        text_to_sign = self.input_text.get(1.0, tk.END).strip()
-        if not text_to_sign:
-            self.output_text.delete(1.0, tk.END)
-            self.output_text.insert(tk.END, "Ошибка: Нет текста для подписи")
+            messagebox.showerror("Ошибка", "Не выбран сертификат")
             return
 
         try:
+            # 1. Получаем UUID и данные для подписи
+            auth_url = "https://aslbelgisi.uz/api/v3/true-api/auth/key"
+            response = requests.get(auth_url)
+            if response.status_code != 200:
+                raise Exception("Ошибка получения данных для подписи")
+            
+            auth_data = response.json()
+            uuid = auth_data['uuid']
+            data_to_sign = auth_data['data']
+            
+            # 2. Подписываем полученные данные
             selected_index = self.combo.current()
             cert_data = self.cert_list[selected_index]
             
-            # 1. Сначала загружаем ключ
             ws = websocket.create_connection(
                 "wss://127.0.0.1:64443/service/cryptapi",
                 sslopt={"cert_reqs": ssl.CERT_NONE}
             )
 
+            # Загружаем ключ
             load_key_request = {
                 "plugin": "pfx",
                 "name": "load_key",
@@ -145,83 +175,93 @@ class CertificateSelector:
                 ]
             }
             
-            print("Загрузка ключа:", json.dumps(load_key_request, indent=2))
             ws.send(json.dumps(load_key_request))
-            key_response = ws.recv()
-            print("Ответ на загрузку ключа:", key_response)
-            key_response = json.loads(key_response)
+            key_response = json.loads(ws.recv())
             
             if not key_response.get("success"):
                 raise Exception(f"Ошибка загрузки ключа: {key_response.get('reason', 'Неизвестная ошибка')}")
             
             key_id = key_response.get("keyId")
-            if not key_id:
-                raise Exception("Не удалось получить ID ключа")
 
-            # 2. Кодируем текст в BASE64
-            text_base64 = base64.b64encode(text_to_sign.encode()).decode()
-
-            # 3. Создаем PKCS7 подпись
+            # Создаем подпись
             sign_request = {
                 "plugin": "pkcs7",
                 "name": "create_pkcs7",
                 "arguments": [
-                    text_base64,    # данные в BASE64
-                    key_id,         # идентификатор ключа
-                    'no'           # не отсоединенная подпись
+                    base64.b64encode(data_to_sign.encode()).decode(),
+                    key_id,
+                    'no'
                 ]
             }
 
-            print("Создание подписи:", json.dumps(sign_request, indent=2))
             ws.send(json.dumps(sign_request))
-            sign_response = ws.recv()
-            print("Ответ на создание подписи:", sign_response)
-            sign_response = json.loads(sign_response)
+            sign_response = json.loads(ws.recv())
             ws.close()
 
-            if sign_response.get("success"):
-                self.output_text.delete(1.0, tk.END)
-                self.output_text.insert(tk.END, sign_response.get("pkcs7_64", "Подпись создана, но не получены данные"))
-            else:
-                error_message = sign_response.get("reason", "Неизвестная ошибка")
-                self.output_text.delete(1.0, tk.END)
-                self.output_text.insert(tk.END, f"Ошибка подписи: {error_message}")
+            if not sign_response.get("success"):
+                raise Exception(f"Ошибка создания подписи: {sign_response.get('reason', 'Неизвестная ошибка')}")
+
+            signature = sign_response.get("pkcs7_64")
+
+            # 3. Отправляем UUID и подпись для получения токена
+            auth_confirm_url = "https://aslbelgisi.uz/api/v3/true-api/auth/simpleSignIn"
+            confirm_response = requests.post(auth_confirm_url, json={
+                'uuid': uuid,
+                'data': signature
+            })
+
+            if confirm_response.status_code != 200:
+                raise Exception(f"Ошибка получения токена: {confirm_response.text}")
+
+            token_data = confirm_response.json()
+            if 'token' not in token_data:
+                raise Exception("Токен не получен в ответе")
+
+            self.current_token = token_data['token']
+            self.current_cert_data = cert_data
+
+            # Обновляем информацию о балансе
+            # self.update_balance()
+
+            messagebox.showinfo("Успех", "Успешно подключено")
 
         except Exception as e:
-            self.output_text.delete(1.0, tk.END)
-            self.output_text.insert(tk.END, f"Ошибка: {str(e)}")
+            messagebox.showerror("Ошибка", f"Ошибка при подключении: {str(e)}")
             if 'ws' in locals():
                 ws.close()
+
+    def get_balance_info(self):
+        url = f"https://aslbelgisi.uz/api/v3/true-api/elk/product-groups/balance/all"
+        response = requests.get(url, headers=self.current_token)
+        
+        if response.status_code == 200:
+            balances = response.json()
+            return balances
+        else:
+            # Заменяем вывод в консоль на модальное окно
+            messagebox.showerror("Ошибка", f"Ошибка при получении баланса. Код ошибки: {response.status_code}\nСообщение об ошибке: {response.text}")
+            return None
+
+
+    def update_balance(self):
+        """Обновляет информацию о балансе"""
+        # try:
+        balance_data = self.get_balance_info()
+        print("Данные о балансе:", balance_data)
+
+        if balance_data is None:
+            raise Exception("Не удалось получить данные о балансе")
+
+        self.balance_labels['balance'].config(text=f"Баланс: {balance_data['balance']}")
+        self.balance_labels['reserved'].config(text=f"Зарезервировано: {balance_data['reserved']}")
+        self.balance_labels['available'].config(text=f"Доступно: {balance_data['available']}")
+
+        # except Exception as e:
+        #     messagebox.showerror("Ошибка", f"Ошибка при обновлении баланса: {str(e)}")
 
     def run(self):
         """Запускает главный цикл приложения"""
         self.root.mainloop()
-
-    def get_available_functions(self):
-        """Получает список доступных функций"""
-        try:
-            ws = websocket.create_connection(
-                "wss://127.0.0.1:64443/service/cryptapi",
-                sslopt={"cert_reqs": ssl.CERT_NONE}
-            )
-
-            # Запрос списка доступных функций
-            list_request = {
-                "name": "list_all_functions"
-            }
-
-            print("Запрос списка функций:", json.dumps(list_request, indent=2))
-            ws.send(json.dumps(list_request))
-            response = ws.recv()
-            print("Доступные функции:", response)
-            ws.close()
-
-            return json.loads(response)
-
-        except Exception as e:
-            print(f"Ошибка при получении списка функций: {str(e)}")
-            return None
-
 
 # Создание и запуск приложения
 if __name__ == "__main__":
