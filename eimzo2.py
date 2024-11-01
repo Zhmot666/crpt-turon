@@ -93,6 +93,10 @@ class ClientCryptAPI:
     def __init__(self, base_url):
         self.base_url = base_url
         self.cert_list = []
+        self.selected_cert_index = None
+
+    def set_selected_cert_index(self, index):
+        self.selected_cert_index = index
 
     def load_certificates(self):
         """Загружает список сертификатов"""
@@ -121,8 +125,9 @@ class ClientCryptAPI:
         return result
 
     def sign_data(self, data_to_sign):
-        selected_index = self.combo.current()
-        cert_data = self.cert_list[selected_index]
+        if self.selected_cert_index is None:
+            raise Exception("Сертификат не выбран")
+        cert_data = self.cert_list[self.selected_cert_index]
 
         ws = websocket.create_connection(
             "wss://127.0.0.1:64443/service/cryptapi",
@@ -370,6 +375,8 @@ class CertificateSelector:
 
         # Выполняем вторую задачу
         # Подписываем полученные данные
+        selected_index = self.combo.current()
+        self.crypt_api_client.set_selected_cert_index(selected_index)
         signed_data = self.crypt_api_client.sign_data(data_to_sign)
 
         # Выполняем третью задачу
