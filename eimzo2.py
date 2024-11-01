@@ -1,5 +1,5 @@
 import tkinter as tk
-from tkinter import ttk, scrolledtext, messagebox
+from tkinter import ttk, messagebox
 import websocket
 import json
 import ssl
@@ -7,24 +7,70 @@ import re
 import base64
 import requests
 
+
 class ClientTrueAPI:
     def __init__(self, base_url):
+        self.balance_labels = None
+        self.uuid = None
         self.base_url = base_url
         self.token = None
-        self.headers = {}
+        self.headers = {
+            'Content-Type': 'application/json',
+            'Authorization': f'Bearer {self.token}'
+        }
+
+    def make_request(self, method, endpoint, data=None):
+        url = f"{self.base_url}{endpoint}"
+        print(url)
+        response = requests.request(method, url, headers=self.headers, json=data)
+        print(f"Status Code: {response.status_code}")
+        print(f"Response Headers: {response.headers}")
+        print(f"Response Content: {response.text}")
+        try:
+            response.raise_for_status()
+            return response.json()
+        except requests.exceptions.JSONDecodeError:
+            print("Не удалось декодировать JSON")
+            return None
+        except requests.exceptions.HTTPError as e:
+            print(f"HTTP ошибка: {e}")
+            return None
+
+    def auth_get(self):
+        # Шаг 1: Получение UUID и data для подписи
+        auth_data = self.make_request('GET', '/auth/key')
+        self.uuid = auth_data['uuid']
+        return auth_data['data']
+
+
+    def auth_post(self, signed_data):
+        # Шаг 3: Отправка подписанных данных для получения токена
+        auth_response = self.make_request('POST', '/auth/simpleSignIn', {
+            'uuid': self.uuid,
+            'data': signed_data
+        })
+
+        if 'token' in auth_response:
+            self.token = auth_response['token']
+            self.headers['Authorization'] = f'Bearer {self.token}'
+            return self.token
+        else:
+            raise Exception("Ошибка аутентификации: токен не получен")
 
     def get_balance_info(self):
+        print(self.token)
+        print(self.headers)
         url = self.base_url + "/elk/product-groups/balance/all"
-        response = requests.get(url, headers=self.current_token)
+        response = requests.get(url, headers=self.headers)
         
         if response.status_code == 200:
             balances = response.json()
             return balances
         else:
             # Заменяем вывод в консоль на модальное окно
-            messagebox.showerror("Ошибка", f"Ошибка при получении баланса. Код ошибки: {response.status_code}\nСообщение об ошибке: {response.text}")
+            messagebox.showerror("Ошибка", f"Ошибка при получении баланса. Код ошибки: "
+                                           f"{response.status_code}\nСообщение об ошибке: {response.text}")
             return None
-
 
     def update_balance(self):
         """Обновляет информацию о балансе"""
@@ -46,9 +92,11 @@ class ClientTrueAPI:
 class ClientCryptAPI:
     def __init__(self, base_url):
         self.base_url = base_url
+        self.cert_list = []
 
     def load_certificates(self):
         """Загружает список сертификатов"""
+        result = ''
         try:
             ws = websocket.create_connection(self.base_url, sslopt={"cert_reqs": ssl.CERT_NONE})
             
@@ -62,13 +110,65 @@ class ClientCryptAPI:
             ws.close()
 
             if certificates.get("success", False):
-                self.cert_list = certificates.get("certificates", [])
-                self.fill_combobox()
+                result = certificates.get("certificates", [])
+                # self.cert_list = certificates.get("certificates", [])
+                # self.fill_combobox()
             else:
                 messagebox.showerror("Ошибка", "Не удалось загрузить сертификаты")
         except Exception as e:
             messagebox.showerror("Ошибка", f"Ошибка при загрузке сертификатов: {str(e)}")
-            
+
+        return result
+
+    def sign_data(self, data_to_sign):
+        selected_index = self.combo.current()
+        cert_data = self.cert_list[selected_index]
+
+        ws = websocket.create_connection(
+            "wss://127.0.0.1:64443/service/cryptapi",
+            sslopt={"cert_reqs": ssl.CERT_NONE}
+        )
+
+        # Загружаем ключ
+        load_key_request = {
+            "plugin": "pfx",
+            "name": "load_key",
+            "arguments": [
+                cert_data['disk'],
+                cert_data['path'],
+                cert_data['name'],
+                cert_data.get('alias', '')
+            ]
+        }
+
+        ws.send(json.dumps(load_key_request))
+        key_response = json.loads(ws.recv())
+
+        if not key_response.get("success"):
+            raise Exception(f"Ошибка загрузки ключа: {key_response.get('reason', 'Неизвестная ошибка')}")
+
+        key_id = key_response.get("keyId")
+
+        # Создаем подпись
+        sign_request = {
+            "plugin": "pkcs7",
+            "name": "create_pkcs7",
+            "arguments": [
+                base64.b64encode(data_to_sign.encode()).decode(),
+                key_id,
+                'no'
+            ]
+        }
+
+        ws.send(json.dumps(sign_request))
+        sign_response = json.loads(ws.recv())
+        ws.close()
+
+        if not sign_response.get("success"):
+            raise Exception(f"Ошибка создания подписи: {sign_response.get('reason', 'Неизвестная ошибка')}")
+
+        signature = sign_response.get("pkcs7_64")
+
 
 class CertificateSelector:
     def __init__(self):
@@ -77,8 +177,8 @@ class CertificateSelector:
         self.root.geometry("800x400")
         
         # Инициализация API-клиентов
-        self.true_api_client = ClientTrueAPI("https://aslbelgisi.uz/api/v3/true-api/auth/key")
-        self.crypt_api_client = ClientCryptAPI("http://127.0.0.1:64443/service/cryptapi")
+        self.true_api_client = ClientTrueAPI("https://aslbelgisi.uz/api/v3/true-api")
+        self.crypt_api_client = ClientCryptAPI("wss://127.0.0.1:64443/service/cryptapi")
 
         # Фрейм для выбора сертификата
         cert_frame = ttk.LabelFrame(self.root, text="Выбор сертификата", padding=10)
@@ -98,15 +198,15 @@ class CertificateSelector:
         self.connect_button = ttk.Button(
             self.root,
             text="Подключиться",
-            command=self.connect_certificate
+            command=self.on_connect
         )
         self.connect_button.pack(pady=10)
 
-        # рейм для отображения баланса
+        # фрейм для отображения баланса
         balance_frame = ttk.LabelFrame(self.root, text="Информация о балансе", padding=10)
         balance_frame.pack(fill="both", expand=True, padx=10, pady=5)
 
-        # Метки для отображеня информации о балансе
+        # Метки для отображения информации о балансе
         self.balance_labels = {
             'balance': ttk.Label(balance_frame, text="Баланс: "),
             'reserved': ttk.Label(balance_frame, text="Зарезервировано: "),
@@ -117,7 +217,12 @@ class CertificateSelector:
 
         # Загружаем сертификаты
         self.cert_list = []
-        self.load_certificates()
+        result = self.crypt_api_client.load_certificates()
+        if isinstance(result, list):  # Проверяем, является ли result списком
+            self.cert_list = result
+        else:
+            print('что-то пошло не так')
+        self.fill_combobox()
 
         # Добавляем переменные для хранения текущего состояния
         self.current_key_id = None
@@ -128,18 +233,16 @@ class CertificateSelector:
         self.update_balance_button = ttk.Button(
             self.root,
             text="Обновить баланс",
-            command=self.update_balance  # Привязываем метод к кнопке
+            command=self.true_api_client.update_balance  # Привязываем метод к кнопке
         )
         self.update_balance_button.pack(pady=10)
-
-
 
     def fill_combobox(self):
         """Заполняет комбобокс данными сертификатов"""
         cert_list = []
         for cert in self.cert_list:
             alias = cert.get('alias', '').upper()
-            # Зменяем идентификаторы на более читаемые
+            # изменяем идентификаторы на более читаемые
             alias = alias.replace("1.2.860.3.16.1.1=", "INN=")
             alias = alias.replace("1.2.860.3.16.1.2=", "PINFL=")
             
@@ -169,9 +272,9 @@ class CertificateSelector:
 
     def connect_certificate(self):
         """Обработчик нажатия кнопки Подключиться"""
-        if not self.cert_var.get():
-            messagebox.showerror("Ошибка", "Не выбран сертификат")
-            return
+        # if not self.cert_var.get():
+        #     messagebox.showerror("Ошибка", "Не выбран сертификат")
+        #     return
 
         try:
             # 1. Получаем UUID и данные для подписи
@@ -260,10 +363,28 @@ class CertificateSelector:
             if 'ws' in locals():
                 ws.close()
 
+    def on_connect(self):
+        # Выполняем первую задачу
+        # Получаем данные для подписи
+        data_to_sign = self.true_api_client.auth_get()
+
+        # Выполняем вторую задачу
+        # Подписываем полученные данные
+        signed_data = self.crypt_api_client.sign_data(data_to_sign)
+
+        # Выполняем третью задачу
+        # Отправляем подписанные данные и получаем ключ доступа
+        self.true_api_client.auth_post(signed_data)
+
+
+        if not self.cert_var.get():
+            messagebox.showerror("Ошибка", "Не выбран сертификат")
+            return
 
     def run(self):
         """Запускает главный цикл приложения"""
         self.root.mainloop()
+
 
 # Создание и запуск приложения
 if __name__ == "__main__":
