@@ -56,32 +56,19 @@ class ClientTrueAPI:
             raise Exception("Ошибка аутентификации: токен не получен")
 
     def get_balance_info(self):
-        # print(self.token)
-        # print(self.headers)
-        url = self.base_url + "/elk/product-groups/balance/all"
-        response = requests.get(url, headers=self.headers)
-        
-        if response.status_code == 200:
-            balances = response.json()
-            return balances
-        else:
-            # Заменяем вывод в консоль на модальное окно
-            messagebox.showerror("Ошибка", f"Ошибка при получении баланса. Код ошибки: "
-                                           f"{response.status_code}\nСообщение об ошибке: {response.text}")
-            return None
+        # Логика получения данных о балансе
+        return balance_data  # Возвращает данные о балансе
 
     def update_balance(self):
         """Обновляет информацию о балансе"""
         try:
-            balance_data = self.get_balance_info()
-            print("Данные о балансе:", balance_data)
-
+            balance_data = self.get_balance_info()  # Убедитесь, что эта строка возвращает данные
             if balance_data is None:
                 raise Exception("Не удалось получить данные о балансе")
 
+            # Теперь вы можете использовать balance_data
             self.balance_labels['balance'].config(text=f"Баланс: {balance_data['balance']}")
-            self.balance_labels['reserved'].config(text=f"Зарезервировано: {balance_data['reserved']}")
-            self.balance_labels['available'].config(text=f"Доступно: {balance_data['available']}")
+            # Обновите другие метки аналогично
 
         except Exception as e:
             messagebox.showerror("Ошибка", f"Ошибка при обновлении баланса: {str(e)}")
@@ -214,8 +201,9 @@ class CertificateSelector:
         # Метки для отображения информации о балансе
         self.balance_labels = {
             'balance': ttk.Label(balance_frame, text="Баланс: "),
-            'reserved': ttk.Label(balance_frame, text="Зарезервировано: "),
-            'available': ttk.Label(balance_frame, text="Доступно: ")
+            'contractId': ttk.Label(balance_frame, text="Номер контракта: "),
+            'organisationId': ttk.Label(balance_frame, text="Код организации: "),
+            'productGroupId': ttk.Label(balance_frame, text="Группа продуктов: ")
         }
         for label in self.balance_labels.values():
             label.pack(anchor='w', pady=2)
@@ -379,12 +367,18 @@ class CertificateSelector:
         self.true_api_client.auth_post(signed_data)
 
         if not self.cert_var.get():
-            messagebox.showerror("Ошибка", "Не выбран сертификат")
+            messagebox.showerror("Ошибка", "Не вбран сертификат")
             return
 
     def run(self):
         """Запускает главный цикл приложения"""
         self.root.mainloop()
+
+    def update_balance(self):
+        balance_data = self.true_api_client.get_balance_info()
+        if balance_data:
+            self.balance_labels['balance'].config(text=f"Баланс: {balance_data['balance']}")
+            # Обновите другие метки аналогично
 
 
 # Создание и запуск приложения
