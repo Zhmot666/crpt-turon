@@ -21,11 +21,10 @@ class ClientTrueAPI:
 
     def make_request(self, method, endpoint, data=None):
         url = f"{self.base_url}{endpoint}"
-        print(url)
         response = requests.request(method, url, headers=self.headers, json=data)
-        print(f"Status Code: {response.status_code}")
-        print(f"Response Headers: {response.headers}")
-        print(f"Response Content: {response.text}")
+        # print(f"Status Code: {response.status_code}")
+        # print(f"Response Headers: {response.headers}")
+        # print(f"Response Content: {response.text}")
         try:
             response.raise_for_status()
             return response.json()
@@ -42,7 +41,6 @@ class ClientTrueAPI:
         self.uuid = auth_data['uuid']
         return auth_data['data']
 
-
     def auth_post(self, signed_data):
         # Шаг 3: Отправка подписанных данных для получения токена
         auth_response = self.make_request('POST', '/auth/simpleSignIn', {
@@ -58,8 +56,8 @@ class ClientTrueAPI:
             raise Exception("Ошибка аутентификации: токен не получен")
 
     def get_balance_info(self):
-        print(self.token)
-        print(self.headers)
+        # print(self.token)
+        # print(self.headers)
         url = self.base_url + "/elk/product-groups/balance/all"
         response = requests.get(url, headers=self.headers)
         
@@ -124,10 +122,11 @@ class ClientCryptAPI:
 
         return result
 
-    def sign_data(self, data_to_sign):
+    def sign_data(self, data_to_sign, cert_list):
         if self.selected_cert_index is None:
             raise Exception("Сертификат не выбран")
-        cert_data = self.cert_list[self.selected_cert_index]
+        # cert_data = self.cert_list[self.selected_cert_index]
+        cert_data = cert_list[self.selected_cert_index]
 
         ws = websocket.create_connection(
             "wss://127.0.0.1:64443/service/cryptapi",
@@ -173,6 +172,7 @@ class ClientCryptAPI:
             raise Exception(f"Ошибка создания подписи: {sign_response.get('reason', 'Неизвестная ошибка')}")
 
         signature = sign_response.get("pkcs7_64")
+        return signature
 
 
 class CertificateSelector:
@@ -369,20 +369,14 @@ class CertificateSelector:
                 ws.close()
 
     def on_connect(self):
-        # Выполняем первую задачу
-        # Получаем данные для подписи
         data_to_sign = self.true_api_client.auth_get()
 
-        # Выполняем вторую задачу
-        # Подписываем полученные данные
         selected_index = self.combo.current()
         self.crypt_api_client.set_selected_cert_index(selected_index)
-        signed_data = self.crypt_api_client.sign_data(data_to_sign)
+        # signed_data = self.crypt_api_client.sign_data(data_to_sign)
+        signed_data = self.crypt_api_client.sign_data(data_to_sign, self.cert_list)
 
-        # Выполняем третью задачу
-        # Отправляем подписанные данные и получаем ключ доступа
         self.true_api_client.auth_post(signed_data)
-
 
         if not self.cert_var.get():
             messagebox.showerror("Ошибка", "Не выбран сертификат")
