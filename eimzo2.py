@@ -56,23 +56,32 @@ class ClientTrueAPI:
             raise Exception("Ошибка аутентификации: токен не получен")
 
     def get_balance_info(self):
-        # Логика получения данных о балансе
-        return balance_data  # Возвращает данные о балансе
+        url = self.base_url + "/elk/product-groups/balance/all"
+        response = requests.get(url, headers=self.headers)
+
+        if response.status_code == 200:
+            balances = response.json()
+            return balances
+        else:
+            messagebox.showerror("Ошибка", f"Ошибка при получении баланса. Код ошибки: "
+                                           f"{response.status_code}\nСообщение о ошибке: {response.text}")
+            return None
 
     def update_balance(self):
         """Обновляет информацию о балансе"""
         try:
             balance_data = self.get_balance_info()  # Убедитесь, что эта строка возвращает данные
+            print(balance_data)
             if balance_data is None:
                 raise Exception("Не удалось получить данные о балансе")
 
-            # Теперь вы можете использовать balance_data
-            self.balance_labels['balance'].config(text=f"Баланс: {balance_data['balance']}")
-            # Обновите другие метки аналогично
+            # Обновите метки на форме с использованием данных о балансе
+            # self.balance_labels['balance'].config(text=f"Баланс: {balance_data['balance']}")
+            return balance_data  # Возвращаем данные о балансе
 
         except Exception as e:
             messagebox.showerror("Ошибка", f"Ошибка при обновлении баланса: {str(e)}")
-
+            return None  # Возвращаем None в случае ошибки
 
 class ClientCryptAPI:
     def __init__(self, base_url):
@@ -226,7 +235,7 @@ class CertificateSelector:
         self.update_balance_button = ttk.Button(
             self.root,
             text="Обновить баланс",
-            command=self.true_api_client.update_balance  # Привязываем метод к кнопке
+            command=self.on_update_balance_button_click
         )
         self.update_balance_button.pack(pady=10)
 
@@ -379,6 +388,20 @@ class CertificateSelector:
         if balance_data:
             self.balance_labels['balance'].config(text=f"Баланс: {balance_data['balance']}")
             # Обновите другие метки аналогично
+
+    def on_update_balance_button_click(self):
+        """Обработчик нажатия кнопки обновления баланса"""
+        balance_info = self.true_api_client.update_balance()  # Вызов метода обновления баланса
+        if balance_info:
+            # Обновляем метки на форме с использованием данных из balance_info
+            self.balance_labels['balance'].config(text=f"Баланс: {balance_info[0]['balance']}")
+            self.balance_labels['contractId'].config(text=f"Номер контракта: {balance_info[0]['contractId']}")
+            self.balance_labels['organisationId'].config(text=f"Код организации: {balance_info[0]['organisationId']}")
+            self.balance_labels['productGroupId'].config(text=f"Группа продуктов: {balance_info[0]['productGroupId']}")
+
+            print("Баланс обновлен:", balance_info)
+        else:
+            print("Не удалось обновить баланс.")
 
 
 # Создание и запуск приложения
