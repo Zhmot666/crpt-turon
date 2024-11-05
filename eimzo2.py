@@ -170,9 +170,35 @@ class ClientCryptAPI:
 
 class ClientLegacyAPI:
     def __init__(self, url):
-        self.token = 'тут будет токен'
-        self.omsId =  'тут будет ID'
+        self.token = self.load_token()  # Считываем токен из файла token.txt
+        self.omsId = self.load_oms_id()  # Считываем omsId из файла oms_id.txt
         self.url = url
+
+    def load_token(self):
+        """Загружает токен из файла token.txt"""
+        try:
+            with open('token.txt', 'r') as file:
+                token = file.read().strip()  # Читаем токен и убираем лишние пробелы
+                return token
+        except FileNotFoundError:
+            print("Файл token.txt не найден.")
+            return None  # Возвращаем None, если файл не найден
+        except Exception as e:
+            print(f"Ошибка при чтении токена: {str(e)}")
+            return None  # Возвращаем None в случае других ошибок
+
+    def load_oms_id(self):
+        """Загружает omsId из файла oms_id.txt"""
+        try:
+            with open('oms_id.txt', 'r') as file:
+                oms_id = file.read().strip()  # Читаем omsId и убираем лишние пробелы
+                return oms_id
+        except FileNotFoundError:
+            print("Файл oms_id.txt не найден.")
+            return None  # Возвращаем None, если файл не найден
+        except Exception as e:
+            print(f"Ошибка при чтении omsId: {str(e)}")
+            return None  # Возвращаем None в случае других ошибок
 
     def check_connection(self, extension):
         print(self.token)
@@ -196,7 +222,7 @@ class ClientLegacyAPI:
             return f"Ошибка при проверке подключения: {str(e)}"
 
     def send_aggregation(self, data, extension):
-        url = f"{self.url}/{extension}/aggregation?omsId={self.oms_id}"
+        url = f"{self.url}/{extension}/aggregation?omsId={self.omsId}"
 
         headers = {
             'Authorization': f'Bearer {self.token}',
@@ -218,6 +244,7 @@ class ClientLegacyAPI:
         except Exception as e:
             raise Exception(f"Ошибка при отправке агрегации: {str(e)}")
 
+
 class Main:
     def __init__(self):
         self.root = tk.Tk()
@@ -234,7 +261,6 @@ class Main:
         self.crypt_api_client = ClientCryptAPI("wss://127.0.0.1:64443/service/cryptapi")
         self.legacy_api_client = ClientLegacyAPI("https://omscloud.aslbelgisi.uz/api/v2")
         
-
         # Фрейм для выбора сертификата
         cert_frame = ttk.LabelFrame(self.root, text="Выбор сертификата", padding=10)
         cert_frame.pack(fill="x", padx=10, pady=5)
@@ -277,10 +303,10 @@ class Main:
         if isinstance(result, list):  # Проверяем, является ли result списком
             self.cert_list = result
         else:
-            print('что-то пошло не так')
+            print('что-то пошло не к')
         self.fill_combobox()
 
-        # Добавляем переменые для хранения текущего состояния
+        # Добавляем переменные для хранения текущего состояния
         self.current_key_id = None
         self.current_cert_data = None
         self.current_token = None
@@ -311,7 +337,6 @@ class Main:
             command=self.send_aggregation
         )
         self.send_aggregation_button.pack(side=tk.LEFT)  # Размещаем справа от кнопки проверки
-
 
     def fill_combobox(self):
         """Заполняет комбобокс данными сертификатов"""
@@ -508,7 +533,12 @@ class Main:
         messagebox.showinfo("Результат проверки", result)
 
     def send_aggregation(self):
-        # Открываем диалог выбора файла
+        production_order_id = tk.simpledialog.askstring("Идентификатор производственного заказа",
+                                                        "Идентификатор производственного заказа:")
+        aggregation_unit_capacity = tk.simpledialog.askstring("Вместимость агрегированной единицы",
+                                                              "Введите Вместимость агрегированной единицы:")
+        
+        # Открываем диалог выбора файл
         file_path = filedialog.askopenfilename(
             title="Выберите JSON файл",
             filetypes=[("JSON files", "*.json"), ("All files", "*.*")]
@@ -520,22 +550,96 @@ class Main:
 
         try:
             # Загружаем данные из выбранного JSON файла
-            with open(file_path, 'r') as file:
-                data = json.load(file)
+            data = self.get_data_from_json(file_path, production_order_id, aggregation_unit_capacity)
 
             extension = "pharma"
-
             result = self.legacy_api_client.send_aggregation(data, extension)
             report_id = result.get("reportId")
             messagebox.showinfo("Успех", f"Отчет успешно отправлен. ID отчета: {report_id}")
-
+            # print(data)
+            
         except json.JSONDecodeError:
-            messagebox.showerror("Ошибка", "Ошибка при загрузке JSON файла. Проверьте формат.")
+            messagebox.showerror("Ошибка", "Ошибка при загрузке JSON файла, проверьте формат.")
         except Exception as e:
             messagebox.showerror("Ошибка", str(e))
+ 
+    def load_participant_id(self, file_path):
+        """Загружает participantId из файла participantId.txt."""
+        try:
+            with open(file_path, 'r') as file:
+                participant_id = file.read().strip()  # Читаем participantId и убираем лишние пробелы
+                return participant_id
+        except FileNotFoundError:
+            print("Файл participantId.txt не найден.")
+            return None  # Возвращаем None, если файл не найден
+        except Exception as e:
+            print(f"Ошибка при чтении participantId: {str(e)}")
+            return None  # Возвращаем None в случае других ошибок
+
+    def extract_sntins_and_serial_numbers(self, data):
+        """Извлекает значения sntins и unitSerialNumber из структуры данных."""
+        aggregation_units = []
+
+        for task_mark in data.get('TaskMarks', []):
+            for barcode_group in task_mark.get('Barcodes', []):
+                if barcode_group.get('level') == 1:
+                    unit_serial_number = barcode_group['Barcode']  # Получаем unitSerialNumber
+                    child_barcodes = [child['Barcode'].split('\u001d')[0] for
+                                      child in barcode_group.get('ChildBarcodes', []) if child.get('level') == 0]
+                    
+                    # Добавляем агрегированную единицу, если есть дочерние штрих-коды
+                    if child_barcodes:
+                        aggregation_units.append({
+                            "unitSerialNumber": unit_serial_number,
+                            "sntins": child_barcodes
+                        })
+
+                # Обрабатываем дочерние группы, если они есть
+                for child in barcode_group.get('ChildBarcodes', []):
+                    if isinstance(child, dict) and 'ChildBarcodes' in child:
+                        aggregation_units.extend(self.extract_sntins_and_serial_numbers(
+                            {'TaskMarks': [{'Barcodes': [child]}]}))
+
+        return aggregation_units
+    
+    def get_data_from_json(self, json_file, production_order_id, aggregation_unit_capacity):
+        """Формирует JSON-данные для создания отчета об агрегации КМ и возвращает их."""
+        
+        # Считываем participantId из файла
+        participant_id = self.load_participant_id('part_id.txt')
+        if participant_id is None:
+            return None
+
+        # Считываем данные из JSON файла
+        with open(json_file, 'r', encoding='utf-8') as file:
+            data = json.load(file)
+
+        # Извлекаем агрегированные единицы
+        aggregation_units = self.extract_sntins_and_serial_numbers(data)
+
+        # Формируем итоговые данные
+        request_data = {
+            "participantId": participant_id,
+            # "productionLineId": data.get("productionLineId"),
+            "productionOrderId": production_order_id,
+            # "dateDoc": data.get("dateDoc"),
+            "aggregationUnits": []
+        }
+
+        # Обрабатываем массив единиц агрегации
+        for unit in aggregation_units:
+            aggregation_unit = {
+                "aggregatedItemsCount": len(unit['sntins']),  # Подсчитываем количество sntins
+                "aggregationType": "AGGREGATION",
+                "aggregationUnitCapacity": int(aggregation_unit_capacity),
+                "sntins": unit['sntins'],  # Используем извлеченные sntins
+                "unitSerialNumber": unit['unitSerialNumber']  # Используем извлеченный unitSerialNumber
+            }
+            request_data["aggregationUnits"].append(aggregation_unit)
+
+        return request_data
 
 
-# Создание и запуск приложения
 if __name__ == "__main__":
     app = Main()
     app.run()

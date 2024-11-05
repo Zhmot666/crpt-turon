@@ -1,11 +1,12 @@
 import requests
 import time
-import json
+# import json
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
-from selenium.webdriver.common.keys import Keys
+# from selenium.webdriver.common.keys import Keys
+
 
 class TrueAPI:
     def __init__(self, base_url):
@@ -59,39 +60,38 @@ class TrueAPI:
             raise Exception("Ошибка аутентификации: токен не получен")
 
     def sign_data(self, data_to_sign):
-            """
-            Функция для подписи данных с помощью ЭЦП.
-            """
-            # Загружаем страницу для подписи
-            self.driver.get('http://dls.yt.uz/certkey-pfx-token-pkcs7.html')
+        # Функция для подписи данных с помощью ЭЦП.
 
-            # Ждем, пока загрузится список ключей
-            WebDriverWait(self.driver, 10).until(
-                EC.presence_of_element_located((By.NAME, "key"))
-            )
+        # Загружаем страницу для подписи
+        self.driver.get('http://dls.yt.uz/certkey-pfx-token-pkcs7.html')
 
-            # Вставляем данные для подписи
-            data_textarea = self.driver.find_element(By.NAME, "data")
-            data_textarea.clear()
-            data_textarea.send_keys(data_to_sign)
+        # Ждем, пока загрузится список ключей
+        WebDriverWait(self.driver, 10).until(
+            EC.presence_of_element_located((By.NAME, "key"))
+        )
 
-            # Нажимаем кнопку "Подписать"
-            sign_button = self.driver.find_element(By.XPATH, "//button[text()='Подписать']")
-            sign_button.click()
+        # Вставляем данные для подписи
+        data_textarea = self.driver.find_element(By.NAME, "data")
+        data_textarea.clear()
+        data_textarea.send_keys(data_to_sign)
 
-            # Ждем появления диалога для ввода PIN-кода
-            time.sleep(30)  # Даем время для появления диалога
+        # Нажимаем кнопку "Подписать"
+        sign_button = self.driver.find_element(By.XPATH, "//button[text()='Подписать']")
+        sign_button.click()
 
-            # Ждем, пока появится подписанный документ
-            WebDriverWait(self.driver, 30).until(
-                EC.presence_of_element_located((By.NAME, "pkcs7"))
-            )
+        # Ждем появления диалога для ввода PIN-кода
+        time.sleep(30)  # Даем время для появления диалога
 
-            # Получаем подписанный документ
-            pkcs7_textarea = self.driver.find_element(By.NAME, "pkcs7")
-            signed_data = pkcs7_textarea.get_attribute('value')
+        # Ждем, пока появится подписанный документ
+        WebDriverWait(self.driver, 30).until(
+            EC.presence_of_element_located((By.NAME, "pkcs7"))
+        )
 
-            return signed_data
+        # Получаем подписанный документ
+        pkcs7_textarea = self.driver.find_element(By.NAME, "pkcs7")
+        signed_data = pkcs7_textarea.get_attribute('value')
+
+        return signed_data
 
     def get_balance(self):
         """
@@ -112,6 +112,39 @@ class TrueAPI:
         if hasattr(self, 'driver'):
             self.driver.quit()
 
+    @staticmethod
+    def ping(extension, oms_id, client_token):
+        import requests
+
+        url = f"https://aslbelgisi.uz/api/v3/{extension}/ping?omsId={oms_id}"
+        headers = {
+            'Authorization': f'Bearer {client_token}',
+            'Content-Type': 'application/json'
+        }
+        print('Старт')
+        try:
+            response = requests.get(url, headers=headers)
+            response.raise_for_status()  # Проверка на успешный ответ
+
+            data = response.json()
+            return {
+                'omsId': data.get('omsId'),
+                'success': data.get('success')
+            }
+        except requests.exceptions.HTTPError as http_err:
+            error_data = response.json() if response.content else {}
+            return {
+                'success': False,
+                'globalErrors': error_data.get('globalErrors', []),
+                'omsId': error_data.get('omsId', None)
+            }
+        except Exception as err:
+            return {
+                'success': False,
+                'globalErrors': [{'error': str(err), 'errorCode': 0}]
+            }
+
+
 def get_name_product_group(product_group_id):
     match product_group_id:
         case 3:
@@ -128,6 +161,7 @@ def get_name_product_group(product_group_id):
             return "Бытовая техника"
         case 19:
             return "Спиртосодержащая непищевая продукция"
+
 
 def print_balance(balances):
     """
@@ -147,12 +181,18 @@ def print_balance(balances):
         print("--------------------")
         print(f"Организация ID: {org_id}")
         print(f"Товарная группа ID: {product_group_id}")
-        print(f"Баланс: {balance_amount if balance_amount != 'Не указан' else 'Не указан'} тийин")
+        if balance_amount != 'Не указан':
+            balance_str = f"{balance_amount // 100} сум {balance_amount % 100} тийин"
+        else:
+            balance_str = 'Не указан'
+        print(f"Баланс: {balance_str}")
         print(f"Контракт ID: {contract_id}")
         print("--------------------")
 
+
 def main():
     api = TrueAPI('https://aslbelgisi.uz/api/v3/true-api')
+    
     
     try:
         token = api.authenticate()
@@ -161,6 +201,8 @@ def main():
         print_balance(balances)
     except Exception as e:
         print(f"Ошибка при аутентификации: {str(e)}")
+    
+    print(TrueAPI.ping('pharma', '14113', token))
 
 
 if __name__ == "__main__":
