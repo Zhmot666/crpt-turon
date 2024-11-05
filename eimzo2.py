@@ -1,5 +1,5 @@
 import tkinter as tk
-from tkinter import ttk, messagebox
+from tkinter import ttk, messagebox, filedialog
 import websocket
 import json
 import ssl
@@ -22,9 +22,6 @@ class ClientTrueAPI:
     def make_request(self, method, endpoint, data=None):
         url = f"{self.base_url}{endpoint}"
         response = requests.request(method, url, headers=self.headers, json=data)
-        # print(f"Status Code: {response.status_code}")
-        # print(f"Response Headers: {response.headers}")
-        # print(f"Response Content: {response.text}")
         try:
             response.raise_for_status()
             return response.json()
@@ -71,7 +68,6 @@ class ClientTrueAPI:
         """Обновляет информацию о балансе"""
         try:
             balance_data = self.get_balance_info()  # Убедитесь, что эта строка возвращает данные
-            print(balance_data)
             if balance_data is None:
                 raise Exception("Не удалось получить данные о балансе")
 
@@ -82,6 +78,7 @@ class ClientTrueAPI:
         except Exception as e:
             messagebox.showerror("Ошибка", f"Ошибка при обновлении баланса: {str(e)}")
             return None  # Возвращаем None в случае ошибки
+
 
 class ClientCryptAPI:
     def __init__(self, base_url):
@@ -171,15 +168,72 @@ class ClientCryptAPI:
         return signature
 
 
-class CertificateSelector:
+class ClientLegacyAPI:
+    def __init__(self, url):
+        self.token = 'тут будет токен'
+        self.omsId =  'тут будет ID'
+        self.url = url
+
+    def check_connection(self, extension):
+        print(self.token)
+        try:
+            url = f"{self.url}/{extension}/ping?omsId={self.omsId}"
+            headers = {
+                'Authorization': f'Bearer {self.token}',
+                'Content-Type': 'application/json',
+                'clientToken': f'{self.token}'
+            }
+            response = requests.get(url, headers=headers, verify=False)
+            print(response)
+
+            if response.status_code == 200:
+                data = response.json()
+                return f"Подключение успешно: {data['omsId']}"
+            else:
+                return f"Ошибка: {response.status_code} - {response.text}"
+
+        except Exception as e:
+            return f"Ошибка при проверке подключения: {str(e)}"
+
+    def send_aggregation(self, data, extension):
+        url = f"{self.url}/{extension}/aggregation?omsId={self.oms_id}"
+
+        headers = {
+            'Authorization': f'Bearer {self.token}',
+            'Content-Type': 'application/json',
+            'clientToken': f'{self.token}'
+        }
+
+        try:
+            response = requests.post(url, headers=headers, json=data, verify=False)
+
+            if response.status_code == 200:
+                result = response.json()
+                return result  # Возвращаем результат для дальнейшей обработки
+            else:
+                error_info = response.json()
+                error_message = error_info.get("globalErrors", [{"error": "Неизвестная ошибка"}])[0]["error"]
+                raise Exception(f"Ошибка: {error_message}")
+
+        except Exception as e:
+            raise Exception(f"Ошибка при отправке агрегации: {str(e)}")
+
+class Main:
     def __init__(self):
         self.root = tk.Tk()
         self.root.title("Подключение к ЭЦП")
         self.root.geometry("800x400")
         
+        # Индикатор подключения
+        self.connection_status_label = ttk.Label(self.root, text="Статус подключения: Не подключено", foreground="red")
+        self.connection_status_label.pack(pady=10)
+
         # Инициализация API-клиентов
-        self.true_api_client = ClientTrueAPI("https://aslbelgisi.uz/api/v3/true-api")
+        # self.true_api_client = ClientTrueAPI("https://aslbelgisi.uz/api/v3/true-api")
+        self.true_api_client = ClientTrueAPI("https://goods.aslbelgisi.uz/api/v3/true-api")
         self.crypt_api_client = ClientCryptAPI("wss://127.0.0.1:64443/service/cryptapi")
+        self.legacy_api_client = ClientLegacyAPI("https://omscloud.aslbelgisi.uz/api/v2")
+        
 
         # Фрейм для выбора сертификата
         cert_frame = ttk.LabelFrame(self.root, text="Выбор сертификата", padding=10)
@@ -226,7 +280,7 @@ class CertificateSelector:
             print('что-то пошло не так')
         self.fill_combobox()
 
-        # Добавляем переменные для хранения текущего состояния
+        # Добавляем переменые для хранения текущего состояния
         self.current_key_id = None
         self.current_cert_data = None
         self.current_token = None
@@ -238,6 +292,26 @@ class CertificateSelector:
             command=self.on_update_balance_button_click
         )
         self.update_balance_button.pack(pady=10)
+
+        button_frame = ttk.Frame(self.root)
+        button_frame.pack(pady=10)
+
+        # Кнопка проверки подключения
+        self.check_connection_button = ttk.Button(
+            button_frame,
+            text="Проверить подключение",
+            command=self.check_connection
+        )
+        self.check_connection_button.pack(side=tk.LEFT)
+
+        # Кнопка "Отправить агрегацию"
+        self.send_aggregation_button = ttk.Button(
+            button_frame,
+            text="Отправить агрегацию",
+            command=self.send_aggregation
+        )
+        self.send_aggregation_button.pack(side=tk.LEFT)  # Размещаем справа от кнопки проверки
+
 
     def fill_combobox(self):
         """Заполняет комбобокс данными сертификатов"""
@@ -273,11 +347,7 @@ class CertificateSelector:
         return field_match.group(1) if field_match else ""
 
     def connect_certificate(self):
-        """Обработчик нажатия кнопки Подключиться"""
-        # if not self.cert_var.get():
-        #     messagebox.showerror("Ошибка", "Не выбран сертификат")
-        #     return
-
+        ws = None
         try:
             # 1. Получаем UUID и данные для подписи
             auth_url = "https://aslbelgisi.uz/api/v3/true-api/auth/key"
@@ -366,18 +436,17 @@ class CertificateSelector:
                 ws.close()
 
     def on_connect(self):
-        data_to_sign = self.true_api_client.auth_get()
+        try:
+            # Ваш код для подключения
+            data_to_sign = self.true_api_client.auth_get()
+            selected_index = self.combo.current()
+            self.crypt_api_client.set_selected_cert_index(selected_index)
+            signed_data = self.crypt_api_client.sign_data(data_to_sign, self.cert_list)
+            self.true_api_client.auth_post(signed_data)
 
-        selected_index = self.combo.current()
-        self.crypt_api_client.set_selected_cert_index(selected_index)
-        # signed_data = self.crypt_api_client.sign_data(data_to_sign)
-        signed_data = self.crypt_api_client.sign_data(data_to_sign, self.cert_list)
-
-        self.true_api_client.auth_post(signed_data)
-
-        if not self.cert_var.get():
-            messagebox.showerror("Ошибка", "Не вбран сертификат")
-            return
+            self.connection_status_label.config(text="Статус подключения: Успешно подключено", foreground="green")
+        except Exception as e:
+            self.connection_status_label.config(text=f"Статус подключения: Ошибка - {str(e)}", foreground="red")
 
     def run(self):
         """Запускает главный цикл приложения"""
@@ -394,17 +463,79 @@ class CertificateSelector:
         balance_info = self.true_api_client.update_balance()  # Вызов метода обновления баланса
         if balance_info:
             # Обновляем метки на форме с использованием данных из balance_info
-            self.balance_labels['balance'].config(text=f"Баланс: {balance_info[0]['balance']}")
-            self.balance_labels['contractId'].config(text=f"Номер контракта: {balance_info[0]['contractId']}")
-            self.balance_labels['organisationId'].config(text=f"Код организации: {balance_info[0]['organisationId']}")
-            self.balance_labels['productGroupId'].config(text=f"Группа продуктов: {balance_info[0]['productGroupId']}")
+            self.write_balance_in_form(balance_info)
 
             print("Баланс обновлен:", balance_info)
         else:
             print("Не удалось обновить баланс.")
 
+    product_group_names_en = {
+        3: "tobacco",
+        7: "pharma",
+        11: "alcohol",
+        13: "water",
+        15: "beer",
+        18: "appliances",
+        19: "antiseptic"
+    }
+
+    product_group_names_ru = {
+        3: "Табачная продукция",
+        7: "Лекарственные средства",
+        11: "Алкогольная продукция",
+        13: "Вода и прохладительные напитки",
+        15: "Пиво и пивные напитки",
+        18: "Бытовая техника",
+        19: "Спиртосодержащая непищевая продукция"
+    }
+
+    def write_balance_in_form(self, balance_info):
+        total_balance = balance_info[0]['balance']
+        sumy = total_balance // 100
+        tiyn = total_balance % 100
+
+        self.balance_labels['balance'].config(text=f"Баланс: {sumy} сумов {tiyn} тийинов")
+        self.balance_labels['contractId'].config(text=f"Номер контракта: {balance_info[0]['contractId']}")
+        self.balance_labels['organisationId'].config(text=f"Код организации: {balance_info[0]['organisationId']}")
+
+        product_group_id = balance_info[0]['productGroupId']
+        product_group_name = self.product_group_names_ru.get(product_group_id, "Неизвестная группа")
+        self.balance_labels['productGroupId'].config(text=f"Группа продукции: {product_group_name}")
+
+    def check_connection(self):
+        extension = "pharma"        # Замените на ваше значение
+        result = self.legacy_api_client.check_connection(extension)
+        messagebox.showinfo("Результат проверки", result)
+
+    def send_aggregation(self):
+        # Открываем диалог выбора файла
+        file_path = filedialog.askopenfilename(
+            title="Выберите JSON файл",
+            filetypes=[("JSON files", "*.json"), ("All files", "*.*")]
+        )
+
+        if not file_path:
+            messagebox.showwarning("Предупреждение", "Файл не выбран.")
+            return
+
+        try:
+            # Загружаем данные из выбранного JSON файла
+            with open(file_path, 'r') as file:
+                data = json.load(file)
+
+            extension = "pharma"
+
+            result = self.legacy_api_client.send_aggregation(data, extension)
+            report_id = result.get("reportId")
+            messagebox.showinfo("Успех", f"Отчет успешно отправлен. ID отчета: {report_id}")
+
+        except json.JSONDecodeError:
+            messagebox.showerror("Ошибка", "Ошибка при загрузке JSON файла. Проверьте формат.")
+        except Exception as e:
+            messagebox.showerror("Ошибка", str(e))
+
 
 # Создание и запуск приложения
 if __name__ == "__main__":
-    app = CertificateSelector()
+    app = Main()
     app.run()
