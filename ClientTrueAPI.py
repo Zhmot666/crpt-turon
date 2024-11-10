@@ -21,11 +21,9 @@ class ClientTrueAPI:
             response.raise_for_status()
             return response.json()
         except requests.exceptions.JSONDecodeError:
-            # print("Не удалось декодировать JSON")
             return None
         except requests.exceptions.HTTPError as e:
-            # print(f"HTTP ошибка: {e}")
-            return None
+            return e
 
     def auth_get(self):
         # Получение UUID и data для подписи
@@ -61,7 +59,7 @@ class ClientTrueAPI:
 
     def update_balance(self):
         try:
-            balance_data = self.get_balance_info()  # Убедитесь, что эта строка возвращает данные
+            balance_data = self.get_balance_info()
             if balance_data is None:
                 raise Exception("Не удалось получить данные о балансе")
 

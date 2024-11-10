@@ -70,8 +70,6 @@ class Main:
         result = self.crypt_api_client.load_certificates()
         if isinstance(result, list):  # Проверяем, является ли result списком
             self.cert_list = result
-        else:
-            print('что-то пошло не к')
         self.fill_combobox()
 
         # Добавляем переменные для хранения текущего состояния
@@ -150,14 +148,14 @@ class Main:
         if cert_list:
             self.combo.set(cert_list[0])
 
-    def _get_x500_val(self, x500name, field):
+    @staticmethod
+    def _get_x500_val(x500name, field):
         """Извлекает значение поля из строки X500Name"""
         field_match = re.search(f"{field}=([^,]+)", x500name)
         return field_match.group(1) if field_match else ""
 
     def on_connect(self):
         try:
-            # Ваш код для подключения
             data_to_sign = self.true_api_client.auth_get()
             selected_index = self.combo.current()
             self.crypt_api_client.set_selected_cert_index(selected_index)
@@ -170,7 +168,6 @@ class Main:
             self.connection_status_label.config(text=f"Статус подключения: Ошибка - {str(e)}", foreground="red")
 
     def run(self):
-        """Запускает главный цикл приложения"""
         self.root.mainloop()
 
     def on_update_balance_button_click(self):
@@ -205,14 +202,36 @@ class Main:
         self.balance_labels['productGroupId'].config(text=f"Группа продукции: {product_group_name}")
 
     def check_connection(self):
-        """Проверяет соединение с выбранной группой продукции и устройством."""
-        # Открываем модальное окно для выбора устройства
-        self.open_device_selection_window()
+        """Проверяет соединение с устройством и товарной группой."""
+        selected_device_name, extension_name = self.open_device_selection_window()  # Получаем выбранные значения
+
+        if not selected_device_name or not extension_name:
+            messagebox.showwarning("Предупреждение", "Пожалуйста, выберите устройство и товарную группу.")
+            return
+
+        # Получаем токен устройства по его имени
+        device_token = self.client_db.get_device_token(selected_device_name)
+
+        if device_token is None:
+            messagebox.showerror("Ошибка", "Не удалось получить токен для выбранного устройства.")
+            return
+
+        # Получаем значение товарной группы по имени
+        extension_value = self.client_db.get_product_group_code_by_name(extension_name)
+
+        if extension_value is None:
+            messagebox.showerror("Ошибка", "Не удалось получить значение товарной "
+                                           "группы для выбранной группы продукции.")
+            return
+
+        # Проверяем соединение
+        result = self.legacy_api_client.check_connection(device_token, extension_value)
+        messagebox.showinfo("Успех", f"Соединение проверено: {result}")
 
     def open_device_selection_window(self):
-        """Создает модальное окно для выбора активного устройства и extension."""
+        """Создает модальное окно для выбора активного устройства и товарной группы."""
         device_selection_window = tk.Toplevel(self.root)  # Создаем новое окно
-        device_selection_window.title("Выбор устройства")
+        device_selection_window.title("Выбор устройства и группы продукции")
         device_selection_window.geometry("300x200")
 
         # Устанавливаем окно как модальное
@@ -222,18 +241,16 @@ class Main:
         # Получаем активные устройства
         active_devices = self.client_db.get_active_devices()
 
-        # Создаем выпадающий список для устройств
+        tk.Label(device_selection_window, text="Выберите устройство:").pack(pady=5)  # Метка для выбора устройства
         selected_device = tk.StringVar()
         device_dropdown = ttk.Combobox(device_selection_window, textvariable=selected_device)
         device_dropdown['values'] = [device['name'] for device in active_devices]
         device_dropdown.pack(pady=10)
 
-        # Получаем доступные extensions из таблицы tmp_product_group
-        extensions = self.client_db.get_all_tmp_product_group_names()  # Получаем доступные extensions
-
-        # Создаем выпадающий список для выбора extension
+        tk.Label(device_selection_window, text="Выберите товарную группу:").pack(pady=5)  # Метка для выбора ТГ
         selected_extension = tk.StringVar()
         extension_dropdown = ttk.Combobox(device_selection_window, textvariable=selected_extension)
+        extensions = self.client_db.get_all_tmp_product_group_names()  # Получаем доступные товарные группы
         extension_dropdown['values'] = extensions  # Заполняем выпадающий список
         extension_dropdown.pack(pady=10)
 
@@ -241,43 +258,32 @@ class Main:
         confirm_button = ttk.Button(device_selection_window, text="Подтвердить", command=lambda: self.confirm_device_selection(selected_device.get(), selected_extension.get(), device_selection_window))
         confirm_button.pack(pady=10)
 
-    def confirm_device_selection(self, device_name, extension_name, window):
-        """Подтверждает выбор устройства и проверяет соединение."""
+        # Ожидаем закрытия окна
+        self.root.wait_window(device_selection_window)
+
+        # Возвращаем выбранные значения
+        return selected_device.get(), selected_extension.get()
+
+    @staticmethod
+    def confirm_device_selection(device_name, extension_name, window):
+        """Подтверждает выбор устройства и закрывает окно."""
         if not device_name:
             messagebox.showwarning("Предупреждение", "Пожалуйста, выберите устройство.")
             return
 
         if not extension_name:
-            messagebox.showwarning("Предупреждение", "Пожалуйста, выберите extension.")
+            messagebox.showwarning("Предупреждение", "Пожалуйста, выберите товарную группу.")
             return
 
-        # Получаем токен устройства по его имени
-        device_token = self.client_db.get_device_token(device_name)  # Предполагается, что этот метод существует
-
-        if device_token is None:
-            messagebox.showerror("Ошибка", "Не удалось получить токен для выбранного устройства.")
-            return
-
-        # Получаем значение extension по имени
-        extension_value = self.client_db.get_product_group_code_by_name(extension_name)
-
-        if extension_value is None:
-            messagebox.showerror("Ошибка", "Не удалось получить значение extension для выбранной группы продукции.")
-            return
-
-        # Передаем токен устройства и соответствующее значение extension в check_connection
-        result = self.legacy_api_client.check_connection(device_token, extension_value)
-
-        messagebox.showinfo("Успех", f"Соединение проверено: {result}")
-        window.destroy()  # Закрываем окно выбора устройства
+        # Закрываем окно
+        window.destroy()
 
     def send_aggregation(self):
         production_order_id = tk.simpledialog.askstring("Идентификатор производственного заказа",
                                                         "Идентификатор производственного заказа:")
         aggregation_unit_capacity = tk.simpledialog.askstring("Вместимость агрегированной единицы",
                                                               "Введите Вместимость агрегированной единицы:")
-        
-        # Открываем диалог выбора файл
+        # Открываем диалог выбора файла
         file_path = filedialog.askopenfilename(
             title="Выберите JSON файл",
             filetypes=[("JSON files", "*.json"), ("All files", "*.*")]
@@ -290,29 +296,34 @@ class Main:
         try:
             # Загружаем данные из выбранного JSON файла
             data = self.get_data_from_json(file_path, production_order_id, aggregation_unit_capacity)
-            extension = self.client_db.get_product_group_code_by_name(self.open_selection_window())
+
+            # Открываем окно выбора устройства и товарной группы
+            selected_device_name, extension_name = self.open_device_selection_window()  # Получаем выбранные значения
+
+            # Получаем токен устройства по его имени
+            device_token = self.client_db.get_device_token(selected_device_name)
+
+            if device_token is None:
+                messagebox.showerror("Ошибка", "Не удалось получить токен для выбранного устройства.")
+                return
+
+            # Получаем значение товарной группы по имени
+            extension = self.client_db.get_product_group_code_by_name(extension_name)
+
+            if extension is None:
+                messagebox.showerror("Ошибка", "Не удалось получить значение товарной "
+                                               "группы для выбранной группы продукции.")
+                return
+
+            # Отправляем агрегацию
             result = self.legacy_api_client.send_aggregation(data, extension, device_token)
             report_id = result.get("reportId")
-            messagebox.showinfo("Успех", f"Отчет успешно отправлен. ID тчета: {report_id}")
-            # print(data)
-            
+            messagebox.showinfo("Успех", f"Отчет успешно отправлен. ID отчета: {report_id}")
+
         except json.JSONDecodeError:
             messagebox.showerror("Ошибка", "Ошибка при загрузке JSON файла, проверьте формат.")
         except Exception as e:
             messagebox.showerror("Ошибка", str(e))
- 
-    # def load_participant_id(self, file_path):
-    #     """Загружает participantId из файла participantId.txt."""
-    #     try:
-    #         with open(file_path, 'r') as file:
-    #             participant_id = file.read().strip()  # Читаем participantId и убираем лишние пробелы
-    #             return participant_id
-    #     except FileNotFoundError:
-    #         print("Файл participantId.txt не найден.")
-    #         return None  # Возвращаем None, если файл не найден
-    #     except Exception as e:
-    #         print(f"Ошибка при чтении participantId: {str(e)}")
-    #         return None  # Возвращаем None в случае других ошибок
 
     def extract_sntins_and_serial_numbers(self, data):
         """Извлекает значения sntins и unitSerialNumber из структуры данных."""
@@ -342,11 +353,6 @@ class Main:
     
     def get_data_from_json(self, json_file, production_order_id, aggregation_unit_capacity):
         """Формирует JSON-данные для создания отчета об агрегации КМ и возвращает их."""
-        
-        # Считываем participantId из файла
-        # participant_id = self.load_participant_id('part_id.txt')
-        # if participant_id is None:
-        #     return None
 
         # Считываем данные из JSON файла
         with open(json_file, 'r', encoding='utf-8') as file:
@@ -381,9 +387,9 @@ class Main:
         """Создает модальное окно для работы с таблицей Setting."""
         settings_window = tk.Toplevel(self.root)  # Создаем новое окно
         settings_window.title("Настройки")
-        settings_window.geometry("500x400")  # Увеличиваем размер окна
+        settings_window.geometry("500x400")
 
-        # Устанавливаем окно как модальное
+        # Устанавливаем окно ак модальное
         settings_window.transient(self.root)  # Устанавливаем родительское окно
         settings_window.grab_set()  # Блокируем взаимодействие с родительским окном
 
@@ -493,7 +499,7 @@ class Main:
         """Добавляет новое устройство."""
         add_device_window = tk.Toplevel(self.root)  # Создаем новое окно
         add_device_window.title("Добавить устройство")
-        add_device_window.geometry("300x200")  # Увеличиваем высоту окна
+        add_device_window.geometry("300x200")
 
         # Устанавливаем окно как модальное
         add_device_window.transient(self.root)  # Устанавливаем родительское окно

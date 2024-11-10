@@ -7,7 +7,8 @@ class ClientDB:
         self.connection = self.create_connection(db_file)
         self.create_tables()
 
-    def create_connection(self, db_file):
+    @staticmethod
+    def create_connection(db_file):
         """Создает подключение к базе данных SQLite."""
         return sqlite3.connect(db_file)
 
@@ -273,4 +274,3 @@ class ClientDB:
         cursor.execute("SELECT token FROM devices WHERE name = ?", (device_name,))
         result = cursor.fetchone()
         return result[0] if result else None  # Возвращаем токен или None, если устройство не найдено
-

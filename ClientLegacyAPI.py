@@ -3,13 +3,10 @@ import requests
 
 class ClientLegacyAPI:
     def __init__(self, url, client_db):
-        # self.token = self.load_token()  # Считываем токен из файла token.txt
         self.omsId = client_db.get_oms_id()  # Загружаем omsId из базы данных таблицы Setting
         self.url = url
 
     def check_connection(self, token, extension):
-        print(token)
-        print(extension)
         try:
             url = f"{self.url}/{extension}/ping?omsId={self.omsId}"
             headers = {
@@ -18,7 +15,6 @@ class ClientLegacyAPI:
                 'clientToken': f'{token}'
             }
             response = requests.get(url, headers=headers, verify=False)
-            print(response)
 
             if response.status_code == 200:
                 data = response.json()
