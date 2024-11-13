@@ -26,6 +26,7 @@ class ClientLegacyAPI:
             return f"Ошибка при проверке подключения: {str(e)}"
 
     def send_aggregation(self, data, extension, token):
+        """Отчет об агрегации"""
         url = f"{self.url}/{extension}/aggregation?omsId={self.omsId}"
 
         headers = {
@@ -47,3 +48,37 @@ class ClientLegacyAPI:
 
         except Exception as e:
             raise Exception(f"Ошибка при отправке агрегации: {str(e)}")
+
+    def send_mark(self, data, extension, token):
+        """Отчет о нанесении"""
+        url = f"{self.url}/{extension}/utilisation?omsId={self.omsId}"
+        
+        headers = {
+            "Authorization": f'Bearer {token}',
+            "Content-Type": "application/json",
+            "clientToken": f'{token}'
+        }
+        
+        # Перед отправкой данных
+        print(f"Отправляемые данные: {data}")
+
+        try:
+            response = requests.post(url, headers=headers, json=data)
+            response.raise_for_status()  # Проверяем статус ответа
+            return response.json()  # Возвращаем успешный ответ
+        except requests.exceptions.HTTPError as http_err:
+            # Обработка ошибок HTTP
+            print(f"HTTP error occurred: {http_err}")  # Логируем ошибку
+            # Вы можете добавить дополнительную логику, например, отправку уведомлений
+        except requests.exceptions.ConnectionError as conn_err:
+            # Обработка ошибок соединения
+            print(f"Connection error occurred: {conn_err}")  # Логируем ошибку
+        except requests.exceptions.Timeout as timeout_err:
+            # Обработка ошибок таймаута
+            print(f"Timeout error occurred: {timeout_err}")  # Логируем ошибку
+        except requests.exceptions.RequestException as req_err:
+            # Обработка всех других ошибок запросов
+            print(f"An error occurred: {req_err}")  # Логируем ошибку
+        except Exception as e:
+            # Обработка любых других исключений
+            print(f"An unexpected error occurred: {e}")  # Логируем ошибку

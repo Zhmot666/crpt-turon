@@ -18,6 +18,7 @@ class ClientDB:
         self.create_product_group_table()
         self.create_tmp_product_group_table()
         self.create_devices_table()
+        self.create_type_of_use_table()
 
     def create_setting_table(self):
         """Создает таблицу Setting, если она не существует, и заполняет её данными."""
@@ -118,18 +119,42 @@ class ClientDB:
         cursor.execute(create_table_sql)
         self.connection.commit()
 
+    def create_type_of_use_table(self):
+        """Создает таблицу type_of_use, если она не существует, и заполняет её данными."""
+        create_table_sql = """
+        CREATE TABLE IF NOT EXISTS type_of_use (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            value TEXT NOT NULL,
+            description TEXT NOT NULL
+        );
+        """
+        cursor = self.connection.cursor()
+        cursor.execute(create_table_sql)
+
+        # Проверка на наличие данных в таблице
+        cursor.execute("SELECT COUNT(*) FROM type_of_use")
+        count = cursor.fetchone()[0]
+
+        # Если таблица пуста, вставляем данные
+        if count == 0:
+            insert_data_sql = """
+            INSERT INTO type_of_use (value, description)
+            VALUES (?, ?);
+            """
+            data = [
+                ("PRINTED", "КМ был напечатан"),
+                ("VERIFIED", "Нанесение КМ подтверждено"),
+                ("USED_FOR_PRODUCTION", "КМ использован на производстве (только для табачки)")
+            ]
+            cursor.executemany(insert_data_sql, data)
+            self.connection.commit()
+
     def get_setting_by_field(self, field_name):
         """Извлекает значение указанного поля из таблицы Setting."""
         cursor = self.connection.cursor()
         query = f"SELECT {field_name} FROM Setting"
         cursor.execute(query)
         return cursor.fetchall()
-
-    def get_tmp_product_group_codes(self):
-        """Извлекает все коды из таблицы tmp_product_group."""
-        cursor = self.connection.cursor()
-        cursor.execute("SELECT code FROM tmp_product_group")
-        return [row[0] for row in cursor.fetchall()]
 
     def close_connection(self):
         """Закрывает подключение к базе данных."""
@@ -168,14 +193,6 @@ class ClientDB:
         query = "SELECT code FROM product_group WHERE name = ?"
         cursor = self.connection.cursor()
         cursor.execute(query, (group_name,))
-        result = cursor.fetchone()
-        return result[0] if result else None
-
-    def get_tmp_product_group_name(self, group_code):
-        """Возвращает имя временной группы продуктов по ее коду."""
-        query = "SELECT name FROM tmp_product_group WHERE code = ?"
-        cursor = self.connection.cursor()
-        cursor.execute(query, (group_code,))
         result = cursor.fetchone()
         return result[0] if result else None
 
@@ -274,3 +291,18 @@ class ClientDB:
         cursor.execute("SELECT token FROM devices WHERE name = ?", (device_name,))
         result = cursor.fetchone()
         return result[0] if result else None  # Возвращаем токен или None, если устройство не найдено
+
+    def get_type_of_use_description(self):
+        """Извлекает все значения типов использования из таблицы type_of_use."""
+        cursor = self.connection.cursor()
+        cursor.execute("SELECT description FROM type_of_use")
+        results = cursor.fetchall()
+        return [row[0] for row in results]  # Возвращаем список значений
+
+    def get_type_of_use_code_by_name(self, type_of_use):
+        """Возвращает код группы продуктов по ее имени."""
+        query = "SELECT value FROM type_of_use WHERE description = ?"
+        cursor = self.connection.cursor()
+        cursor.execute(query, (type_of_use,))
+        result = cursor.fetchone()
+        return result[0] if result else None

@@ -1,3 +1,4 @@
+from datetime import datetime
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
 import json
@@ -7,6 +8,7 @@ from ClientCryptAPI import ClientCryptAPI
 from ClientLegacyAPI import ClientLegacyAPI
 from ClientTrueAPI import ClientTrueAPI
 from DBClient import ClientDB
+from tkcalendar import DateEntry  # Импортируем DateEntry
 
 
 class Main:
@@ -104,13 +106,21 @@ class Main:
         )
         self.devices_button.pack(side=tk.LEFT, padx=5)
 
-        # Кнопка проверки подключения
+        # Кнопка "Проверить подключение"
         self.check_connection_button = ttk.Button(
             button_frame,
             text="Проверить подключение",
             command=self.check_connection
         )
         self.check_connection_button.pack(side=tk.LEFT, padx=5)
+
+        # Кнопка "Отправить КМ"
+        self.send_km_button = ttk.Button(
+            button_frame,
+            text="Отправить КМ",
+            command=self.open_send_km_dialog
+        )
+        self.send_km_button.pack(side=tk.LEFT, padx=5)
 
         # Кнопка "Отправить агрегацию"
         self.send_aggregation_button = ttk.Button(
@@ -171,7 +181,7 @@ class Main:
         self.root.mainloop()
 
     def on_update_balance_button_click(self):
-        """Обработчик нажатия кнопки обновления баланса"""
+        """Обработчи нажатия кнопки обновления баланса"""
         balance_info = self.true_api_client.update_balance()  # Вызов метода обновления баланса
 
         self.client_db.clear_tmp_product_group()
@@ -548,6 +558,119 @@ class Main:
         # Обновляем статус в Treeview
         new_status_text = "Активно" if new_status == 1 else "НЕ активно"
         self.devices_tree.item(selected_item, values=(device_name, self.devices_tree.item(selected_item)['values'][1], new_status_text))
+
+    def open_send_km_dialog(self):
+        """Создает модальное окно для отправки КМ."""
+        send_km_window = tk.Toplevel(self.root)  # Создаем новое окно
+        send_km_window.title("Отправить КМ")
+        send_km_window.geometry("500x370")  # Увеличиваем высоту формы
+
+        # Устанавливаем окно как модальное
+        send_km_window.transient(self.root)
+        send_km_window.grab_set()
+
+        # Выбор товарной группы
+        tk.Label(send_km_window, text="Выберите товарную группу:").pack(pady=5)
+        selected_product_group = tk.StringVar()
+        product_group_dropdown = ttk.Combobox(send_km_window, textvariable=selected_product_group, width=40)  # Увеличиваем ширину
+        product_group_dropdown['values'] = self.client_db.get_all_tmp_product_group_names()  # Получаем товарные группы
+        product_group_dropdown.pack(pady=10)
+
+        # Выбор типа использования
+        tk.Label(send_km_window, text="Выберите тип использования:").pack(pady=5)
+        selected_type_of_use = tk.StringVar()
+        type_of_use_dropdown = ttk.Combobox(send_km_window, textvariable=selected_type_of_use, width=40)  # Увеличиваем ширину
+        type_of_use_dropdown['values'] = self.client_db.get_type_of_use_description()  # Получаем типы использования
+        type_of_use_dropdown.pack(pady=10)
+
+        # Выбор устройства
+        tk.Label(send_km_window, text="Выберите устройство:").pack(pady=5)
+        selected_activ_device = tk.StringVar()
+        activ_device_dropdown = ttk.Combobox(send_km_window, textvariable=selected_activ_device, width=40)  # Увеличиваем ширину
+        activ_device_dropdown['values'] = [device['name'] for device in self.client_db.get_active_devices()]  # Получаем активные устройства
+        activ_device_dropdown.pack(pady=10)
+        
+        # Выбор JSON файла
+        tk.Label(send_km_window, text="Выберите JSON файл:").pack(pady=5)
+        json_file_path = tk.StringVar()
+        json_file_entry = tk.Entry(send_km_window, textvariable=json_file_path)
+        json_file_entry.pack(pady=5)
+        json_file_button = ttk.Button(send_km_window, text="Обзор", command=lambda: self.select_json_file(json_file_path))
+        json_file_button.pack(pady=5)
+
+        # Кнопка для отправки данных
+        send_button = ttk.Button(send_km_window, text="Отправить", command=lambda: self.send_km_data(
+            selected_product_group.get(),
+            selected_type_of_use.get(),
+            json_file_path.get(),
+            selected_activ_device.get()
+
+        ))
+        send_button.pack(pady=10)
+
+        # Ожидаем закрытия окна
+        self.root.wait_window(send_km_window)
+
+    def select_json_file(self, json_file_path):
+        """Открывает диалог для выбора JSON файла."""
+        file_path = filedialog.askopenfilename(
+            title="Выберите JSON файл",
+            filetypes=[("JSON files", "*.json"), ("All files", "*.*")]
+        )
+        if file_path:
+            json_file_path.set(file_path)
+
+    def send_km_data(self, product_group, type_of_use, json_file, token):
+        """Обрабатывает отправку данных КМ."""
+        # Список для хранения штрих-кодов и даты
+        sntins = []
+        date_manufacture = None
+        date_expiration = None
+        claim_number = None
+        name_product = None
+
+        def extract_data(data):
+            """Рекурсивная функция для извлечения штрих-кодов и дат."""
+            nonlocal date_manufacture, date_expiration, claim_number, name_product
+            if isinstance(data, dict):
+                # Извлечение даты производства и даты истечения срока
+                if 'DateManufacture' in data:
+                    date_manufacture = data['DateManufacture']
+                if 'DateExpiration' in data:
+                    date_expiration = data['DateExpiration']
+                if 'ClaimNumber' in data:
+                    claim_number = data['ClaimNumber']
+                if 'NameProduct' in data:
+                    name_product = data['NameProduct']
+                # Проверяем, есть ли ключ 'Barcode' и 'level'
+                if 'Barcode' in data and data.get('level') == 0:
+                    sntins.append(data['Barcode'])
+                # Рекурсивно обходим все ключи в словаре
+                for key, value in data.items():
+                    extract_data(value)
+            elif isinstance(data, list):
+                # Рекурсивно обходим все элементы списка
+                for item in data:
+                    extract_data(item)
+
+        # Чтение JSON файла
+        with open(json_file, 'r', encoding='utf-8') as file:
+            data = json.load(file)
+            # Запускаем рекурсивную функцию
+            extract_data(data)
+
+        extension = self.client_db.get_product_group_code_by_name(product_group)
+        token = self.client_db.get_device_token(token)
+        json_data = dict()
+        json_data["sntins"] = sntins
+        json_data["usageType"] = self.client_db.get_type_of_use_code_by_name(type_of_use)
+        json_data["brandcode"] = name_product
+        json_data["productionDate"] = datetime.strptime(date_manufacture, "%Y.%m.%d").isoformat()+"Z"
+        json_data["expirationDate"] = datetime.strptime(date_expiration, "%Y.%m.%d").isoformat()+"Z"
+        json_data["seriesNumber"] = claim_number
+        result = self.legacy_api_client.send_mark(json_data, extension, token)
+        if result == 200:
+             messagebox.showinfo("Успех", "Данные успешно отправлены!")
 
 
 if __name__ == "__main__":
