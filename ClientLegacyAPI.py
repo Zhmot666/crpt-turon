@@ -59,26 +59,70 @@ class ClientLegacyAPI:
             "clientToken": f'{token}'
         }
         
-        # Перед отправкой данных
-        print(f"Отправляемые данные: {data}")
-
         try:
-            response = requests.post(url, headers=headers, json=data)
-            response.raise_for_status()  # Проверяем статус ответа
-            return response.json()  # Возвращаем успешный ответ
-        except requests.exceptions.HTTPError as http_err:
-            # Обработка ошибок HTTP
-            print(f"HTTP error occurred: {http_err}")  # Логируем ошибку
-            # Вы можете добавить дополнительную логику, например, отправку уведомлений
-        except requests.exceptions.ConnectionError as conn_err:
-            # Обработка ошибок соединения
-            print(f"Connection error occurred: {conn_err}")  # Логируем ошибку
-        except requests.exceptions.Timeout as timeout_err:
-            # Обработка ошибок таймаута
-            print(f"Timeout error occurred: {timeout_err}")  # Логируем ошибку
-        except requests.exceptions.RequestException as req_err:
-            # Обработка всех других ошибок запросов
-            print(f"An error occurred: {req_err}")  # Логируем ошибку
+            # Устанавливаем таймаут для операции
+            response = requests.post(url, headers=headers, json=data, timeout=30, verify=False)
+            
+            # Проверяем HTTP-статус ответа
+            if response.status_code == 200:
+                return {
+                    "status": "success",
+                    "status_code": 200,
+                    "data": response.json(),
+                    "message": "Данные успешно отправлены"
+                }
+            # Ответ сервера не 200, но в JSON-формате
+            elif response.headers.get('Content-Type', '').startswith('application/json'):
+                error_data = response.json()
+                error_message = error_data.get("message", "Неизвестная ошибка сервера")
+                
+                if "globalErrors" in error_data:
+                    error_details = error_data.get("globalErrors", [])[0].get("error", "")
+                    error_message = f"{error_message}: {error_details}"
+                
+                return {
+                    "status": "error",
+                    "status_code": response.status_code,
+                    "data": error_data,
+                    "message": error_message
+                }
+            # Ответ сервера не в JSON-формате
+            else:
+                return {
+                    "status": "error",
+                    "status_code": response.status_code,
+                    "data": None,
+                    "message": f"Сервер вернул код {response.status_code}: {response.text}"
+                }
+                
+        except requests.exceptions.Timeout:
+            return {
+                "status": "error",
+                "status_code": 0,
+                "data": None,
+                "message": "Превышено время ожидания ответа от сервера"
+            }
+            
+        except requests.exceptions.ConnectionError:
+            return {
+                "status": "error", 
+                "status_code": 0,
+                "data": None,
+                "message": "Не удалось установить соединение с сервером"
+            }
+            
+        except requests.exceptions.RequestException as e:
+            return {
+                "status": "error",
+                "status_code": 0,
+                "data": None,
+                "message": f"Ошибка при отправке запроса: {str(e)}"
+            }
+            
         except Exception as e:
-            # Обработка любых других исключений
-            print(f"An unexpected error occurred: {e}")  # Логируем ошибку
+            return {
+                "status": "error",
+                "status_code": 0,
+                "data": None,
+                "message": f"Непредвиденная ошибка: {str(e)}"
+            }

@@ -16,8 +16,10 @@ class Main:
         self.root = tk.Tk()
         self.root.title("CRPT-TURON")
         self.root.geometry("800x400")
-        
+
         # Индикатор подключения
+        self.connection_indicator = ttk.Label(self.root, text="●", foreground="red", font=("Arial", 16)) # Added connection indicator
+        self.connection_indicator.pack(pady=5) # Added connection indicator
         self.connection_status_label = ttk.Label(self.root, text="Статус подключения: Не подключено", foreground="red")
         self.connection_status_label.pack(pady=10)
 
@@ -30,7 +32,7 @@ class Main:
         self.true_api_client = ClientTrueAPI(api_urls["PathTrueAPI"])
         self.crypt_api_client = ClientCryptAPI(api_urls["PathCryptAPI"])
         self.legacy_api_client = ClientLegacyAPI(api_urls["PathLegacyAPI"], self.client_db)        
-        
+
         # Фрейм для выбора сертификата
         cert_frame = ttk.LabelFrame(self.root, text="Выбор сертификата", padding=10)
         cert_frame.pack(fill="x", padx=10, pady=5)
@@ -130,6 +132,9 @@ class Main:
         )
         self.send_aggregation_button.pack(side=tk.LEFT)  # Размещаем справа от кнопки проверки
 
+        self.status_label = ttk.Label(self.root, text="") # Added status label
+        self.status_label.pack(pady=5) # Added status label
+
     def fill_combobox(self):
         """Заполняет комбобокс данными сертификатов"""
         cert_list = []
@@ -138,7 +143,7 @@ class Main:
             # изменяем идентификаторы на более читаемые
             alias = alias.replace("1.2.860.3.16.1.1=", "INN=")
             alias = alias.replace("1.2.860.3.16.1.2=", "PINFL=")
-            
+
             # Извлекаем нужные поля
             vo = {
                 'serialNumber': self._get_x500_val(alias, "SERIALNUMBER"),
@@ -153,7 +158,7 @@ class Main:
             # Формируем строку для отображения
             display_string = f"{vo['O']} - {vo['CN']} ({vo['TIN']})"
             cert_list.append(display_string)
-        
+
         self.combo['values'] = cert_list
         if cert_list:
             self.combo.set(cert_list[0])
@@ -165,51 +170,119 @@ class Main:
         return field_match.group(1) if field_match else ""
 
     def on_connect(self):
+        """Обработчик нажатия кнопки подключения"""
+        # Деактивируем кнопку на время подключения
+        self.connect_button.config(state="disabled")
+        self.update_status("Выполняется подключение...")
+
         try:
+            # Изменяем индикатор на "в процессе"
+            self.connection_indicator.config(text="●", foreground="orange")
+            self.connection_status_label.config(text="Статус: Подключение...", foreground="orange")
+            self.root.update_idletasks()  # Обновляем интерфейс
+
             data_to_sign = self.true_api_client.auth_get()
             selected_index = self.combo.current()
+
+            if selected_index == -1:
+                raise Exception("Сертификат не выбран")
+
             self.crypt_api_client.set_selected_cert_index(selected_index)
+
+            self.update_status("Подписываем данные...")
             signed_data = self.crypt_api_client.sign_data(data_to_sign, self.cert_list)
+
+            self.update_status("Авторизация...")
             self.true_api_client.auth_post(signed_data)
 
-            self.connection_status_label.config(text="Статус подключения: Успешно подключено", foreground="green")
+            # Успешное подключение
+            self.connection_indicator.config(text="●", foreground="green")
+            self.connection_status_label.config(text="Статус: Подключено", foreground="green")
+            self.update_status("Подключение выполнено успешно")
+
+            # Получаем баланс после подключения
             self.on_update_balance_button_click()
+
         except Exception as e:
-            self.connection_status_label.config(text=f"Статус подключения: Ошибка - {str(e)}", foreground="red")
+            self.connection_indicator.config(text="●", foreground="red")
+            self.connection_status_label.config(text="Статус: Ошибка", foreground="red")
+            self.update_status(f"Ошибка подключения: {str(e)}", error=True)
+            messagebox.showerror("Ошибка подключения", str(e))
+        finally:
+            # Восстанавливаем кнопку
+            self.connect_button.config(state="normal")
 
     def run(self):
         self.root.mainloop()
 
     def on_update_balance_button_click(self):
-        """Обработчи нажатия кнопки обновления баланса"""
-        balance_info = self.true_api_client.update_balance()  # Вызов метода обновления баланса
+        """Обработчик нажатия кнопки обновления баланса"""
+        self.update_balance_button.config(state="disabled")
+        self.update_status("Получение данных о балансе...")
 
-        self.client_db.clear_tmp_product_group()
-        # Перебираем balance_info и заполняем tmp_product_group
-        for item in balance_info:
-            product_group_id = item["productGroupId"]
-            product_groups = self.client_db.get_product_group_data()  # Получаем product_groups из базы данных
-            # Находим соответствующую запись в product_group
-            for group in product_groups:
-                if group[0] == product_group_id:  # group[0] - это id из product_group
-                    self.client_db.insert_into_tmp_product_group(group)
-        
-        if balance_info:
+        try:
+            balance_info = self.true_api_client.update_balance()  # Вызов метода обновления баланса
+
+            if not balance_info:
+                self.update_status("Не удалось получить информацию о балансе", error=True)
+                return
+
+            self.update_status("Обновление временных групп продуктов...")
+            self.client_db.clear_tmp_product_group()
+
+            # Перебираем balance_info и заполняем tmp_product_group
+            for item in balance_info:
+                product_group_id = item["productGroupId"]
+                product_groups = self.client_db.get_product_group_data()  # Получаем product_groups из базы данных
+                # Находим соответствующую запись в product_group
+                for group in product_groups:
+                    if group[0] == product_group_id:  # group[0] - это id из product_group
+                        self.client_db.insert_into_tmp_product_group(group)
+
             # Обновляем метки на форме с использованием данных из balance_info
             self.write_balance_in_form(balance_info)
+            self.update_status("Данные о балансе обновлены")
+
+        except Exception as e:
+            self.update_status(f"Ошибка при обновлении баланса: {str(e)}", error=True)
+            messagebox.showerror("Ошибка обновления баланса", str(e))
+        finally:
+            self.update_balance_button.config(state="normal")
 
     def write_balance_in_form(self, balance_info):
+        """Обновляет отображение баланса в интерфейсе"""
         total_balance = balance_info[0]['balance']
         sumy = total_balance // 100
         tiyn = total_balance % 100
 
-        self.balance_labels['balance'].config(text=f"Баланс: {sumy} сумов {tiyn} тийинов")
-        self.balance_labels['contractId'].config(text=f"Номер контракта: {balance_info[0]['contractId']}")
-        self.balance_labels['organisationId'].config(text=f"Код организации: {balance_info[0]['organisationId']}")
+        # Форматируем сумму с разделителями тысяч для лучшей читаемости
+        formatted_sum = f"{sumy:,}".replace(",", " ")
+
+        self.balance_labels['balance'].config(
+            text=f"{formatted_sum} сумов {tiyn:02d} тийинов"
+        )
+
+        self.balance_labels['contractId'].config(
+            text=balance_info[0]['contractId']
+        )
+
+        self.balance_labels['organisationId'].config(
+            text=balance_info[0]['organisationId']
+        )
 
         product_group_id = balance_info[0]['productGroupId']
         product_group_name = self.client_db.get_product_group_name(product_group_id)
-        self.balance_labels['productGroupId'].config(text=f"Группа продукции: {product_group_name}")
+
+        self.balance_labels['productGroupId'].config(
+            text=product_group_name if product_group_name else "Не определено"
+        )
+
+    def update_status(self, message, error=False):
+        """Updates the status label with a message."""
+        color = "red" if error else "black"
+        self.status_label.config(text=message, foreground=color)
+        self.root.update_idletasks()
+
 
     def check_connection(self):
         """Проверяет соединение с устройством и товарной группой."""
@@ -345,7 +418,7 @@ class Main:
                     unit_serial_number = barcode_group['Barcode']  # Получаем unitSerialNumber
                     child_barcodes = [child['Barcode'].split('\u001d')[0] for
                                       child in barcode_group.get('ChildBarcodes', []) if child.get('level') == 0]
-                    
+
                     # Добавляем агрегированную единицу, если есть дочерние штрих-коды
                     if child_barcodes:
                         aggregation_units.append({
@@ -360,7 +433,7 @@ class Main:
                             {'TaskMarks': [{'Barcodes': [child]}]}))
 
         return aggregation_units
-    
+
     def get_data_from_json(self, json_file, production_order_id, aggregation_unit_capacity):
         """Формирует JSON-данные для создания отчета об агрегации КМ и возвращает их."""
 
@@ -589,7 +662,7 @@ class Main:
         activ_device_dropdown = ttk.Combobox(send_km_window, textvariable=selected_activ_device, width=40)  # Увеличиваем ширину
         activ_device_dropdown['values'] = [device['name'] for device in self.client_db.get_active_devices()]  # Получаем активные устройства
         activ_device_dropdown.pack(pady=10)
-        
+
         # Выбор JSON файла
         tk.Label(send_km_window, text="Выберите JSON файл:").pack(pady=5)
         json_file_path = tk.StringVar()
@@ -654,23 +727,31 @@ class Main:
                     extract_data(item)
 
         # Чтение JSON файла
-        with open(json_file, 'r', encoding='utf-8') as file:
-            data = json.load(file)
-            # Запускаем рекурсивную функцию
-            extract_data(data)
+        try:
+            with open(json_file, 'r', encoding='utf-8') as file:
+                data = json.load(file)
+                # Запускаем рекурсивную функцию
+                extract_data(data)
 
-        extension = self.client_db.get_product_group_code_by_name(product_group)
-        token = self.client_db.get_device_token(token)
-        json_data = dict()
-        json_data["sntins"] = sntins
-        json_data["usageType"] = self.client_db.get_type_of_use_code_by_name(type_of_use)
-        json_data["brandcode"] = name_product
-        json_data["productionDate"] = datetime.strptime(date_manufacture, "%Y.%m.%d").isoformat()+"Z"
-        json_data["expirationDate"] = datetime.strptime(date_expiration, "%Y.%m.%d").isoformat()+"Z"
-        json_data["seriesNumber"] = claim_number
-        result = self.legacy_api_client.send_mark(json_data, extension, token)
-        if result == 200:
-             messagebox.showinfo("Успех", "Данные успешно отправлены!")
+            extension = self.client_db.get_product_group_code_by_name(product_group)
+            token = self.client_db.get_device_token(token)
+            if not extension or not token:
+                raise Exception("Не удалось получить код товарной группы или токен устройства.")
+
+            json_data = dict()
+            json_data["sntins"] = sntins
+            json_data["usageType"] = self.client_db.get_type_of_use_code_by_name(type_of_use)
+            json_data["brandcode"] = name_product
+            json_data["productionDate"] = datetime.strptime(date_manufacture, "%Y.%m.%d").isoformat()+"Z"
+            json_data["expirationDate"] = datetime.strptime(date_expiration, "%Y.%m.%d").isoformat()+"Z"
+            json_data["seriesNumber"] = claim_number
+            result = self.legacy_api_client.send_mark(json_data, extension, token)
+            if result == 200:
+                messagebox.showinfo("Успех", "Данные успешно отправлены!")
+        except (FileNotFoundError, json.JSONDecodeError):
+            messagebox.showerror("Ошибка", "Ошибка при загрузке JSON файла, проверьте формат или путь.")
+        except Exception as e:
+            messagebox.showerror("Ошибка", f"Ошибка отправки данных: {str(e)}")
 
 
 if __name__ == "__main__":
