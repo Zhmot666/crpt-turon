@@ -15,7 +15,7 @@ class Main:
     def __init__(self):
         self.root = tk.Tk()
         self.root.title("CRPT-TURON")
-        self.root.geometry("800x400")
+        self.root.geometry("900x500")
 
         # Индикатор подключения
         self.connection_indicator = ttk.Label(self.root, text="●", foreground="red", font=("Arial", 16)) # Added connection indicator
@@ -90,7 +90,7 @@ class Main:
         self.update_balance_button.pack(pady=10)
 
         button_frame = ttk.Frame(self.root)
-        button_frame.pack(pady=10)
+        button_frame.pack(pady=10, fill='x', padx=20)
 
         # Кнопка Настройки
         self.settings_button = ttk.Button(
