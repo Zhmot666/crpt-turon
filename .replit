@@ -6,3 +6,14 @@ channel = "stable-24_05"
 
 [deployment]
 run = ["sh", "-c", "run"]
+
+[workflows]
+
+[[workflows.workflow]]
+name = "crpt-turon"
+mode = "sequential"
+author = 24304412
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "python main.py"
