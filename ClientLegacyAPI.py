@@ -65,12 +65,7 @@ class ClientLegacyAPI:
             
             # Проверяем HTTP-статус ответа
             if response.status_code == 200:
-                return {
-                    "status": "success",
-                    "status_code": 200,
-                    "data": response.json(),
-                    "message": "Данные успешно отправлены"
-                }
+                return 200  # Возвращаем код успеха для единообразия
             # Ответ сервера не 200, но в JSON-формате
             elif response.headers.get('Content-Type', '').startswith('application/json'):
                 error_data = response.json()
@@ -80,49 +75,20 @@ class ClientLegacyAPI:
                     error_details = error_data.get("globalErrors", [])[0].get("error", "")
                     error_message = f"{error_message}: {error_details}"
                 
-                return {
-                    "status": "error",
-                    "status_code": response.status_code,
-                    "data": error_data,
-                    "message": error_message
-                }
+                raise Exception(error_message)
             # Ответ сервера не в JSON-формате
             else:
-                return {
-                    "status": "error",
-                    "status_code": response.status_code,
-                    "data": None,
-                    "message": f"Сервер вернул код {response.status_code}: {response.text}"
-                }
+                raise Exception(f"Сервер вернул код {response.status_code}: {response.text}")
                 
         except requests.exceptions.Timeout:
-            return {
-                "status": "error",
-                "status_code": 0,
-                "data": None,
-                "message": "Превышено время ожидания ответа от сервера"
-            }
+            raise Exception("Превышено время ожидания ответа от сервера")
             
         except requests.exceptions.ConnectionError:
-            return {
-                "status": "error", 
-                "status_code": 0,
-                "data": None,
-                "message": "Не удалось установить соединение с сервером"
-            }
+            raise Exception("Не удалось установить соединение с сервером")
             
         except requests.exceptions.RequestException as e:
-            return {
-                "status": "error",
-                "status_code": 0,
-                "data": None,
-                "message": f"Ошибка при отправке запроса: {str(e)}"
-            }
+            raise Exception(f"Ошибка при отправке запроса: {str(e)}")
             
         except Exception as e:
-            return {
-                "status": "error",
-                "status_code": 0,
-                "data": None,
-                "message": f"Непредвиденная ошибка: {str(e)}"
-            }
+            # Пробрасываем исключение дальше
+            raise

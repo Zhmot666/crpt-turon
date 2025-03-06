@@ -3,6 +3,21 @@ import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
 import json
 import re
+import logging
+import os
+
+# Настройка логирования
+if not os.path.exists('logs'):
+    os.makedirs('logs')
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler('logs/app.log'),
+        logging.StreamHandler()
+    ]
+)
+logger = logging.getLogger('CRPT-TURON')
 
 from ClientCryptAPI import ClientCryptAPI
 from ClientLegacyAPI import ClientLegacyAPI
@@ -131,6 +146,14 @@ class Main:
             command=self.send_aggregation
         )
         self.send_aggregation_button.pack(side=tk.LEFT)  # Размещаем справа от кнопки проверки
+        
+        # Кнопка "История действий"
+        self.history_button = ttk.Button(
+            button_frame,
+            text="История действий",
+            command=self.show_history
+        )
+        self.history_button.pack(side=tk.LEFT, padx=5)
 
         self.status_label = ttk.Label(self.root, text="") # Added status label
         self.status_label.pack(pady=5) # Added status label
@@ -174,6 +197,7 @@ class Main:
         # Деактивируем кнопку на время подключения
         self.connect_button.config(state="disabled")
         self.update_status("Выполняется подключение...")
+        logger.info("Начата процедура подключения")
 
         try:
             # Изменяем индикатор на "в процессе"
@@ -181,24 +205,32 @@ class Main:
             self.connection_status_label.config(text="Статус: Подключение...", foreground="orange")
             self.root.update_idletasks()  # Обновляем интерфейс
 
+            logger.debug("Запрос данных для аутентификации")
             data_to_sign = self.true_api_client.auth_get()
             selected_index = self.combo.current()
 
             if selected_index == -1:
+                logger.error("Попытка подключения без выбора сертификата")
                 raise Exception("Сертификат не выбран")
 
             self.crypt_api_client.set_selected_cert_index(selected_index)
+            logger.debug(f"Выбран сертификат с индексом {selected_index}")
 
             self.update_status("Подписываем данные...")
+            logger.debug("Начато подписание данных")
             signed_data = self.crypt_api_client.sign_data(data_to_sign, self.cert_list)
+            logger.debug("Данные успешно подписаны")
 
             self.update_status("Авторизация...")
+            logger.debug("Отправка запроса авторизации")
             self.true_api_client.auth_post(signed_data)
+            logger.info("Авторизация успешно выполнена")
 
             # Успешное подключение
             self.connection_indicator.config(text="●", foreground="green")
             self.connection_status_label.config(text="Статус: Подключено", foreground="green")
             self.update_status("Подключение выполнено успешно")
+            logger.info("Подключение выполнено успешно")
 
             # Получаем баланс после подключения
             self.on_update_balance_button_click()
@@ -207,10 +239,12 @@ class Main:
             self.connection_indicator.config(text="●", foreground="red")
             self.connection_status_label.config(text="Статус: Ошибка", foreground="red")
             self.update_status(f"Ошибка подключения: {str(e)}", error=True)
+            logger.error(f"Ошибка подключения: {str(e)}", exc_info=True)
             messagebox.showerror("Ошибка подключения", str(e))
         finally:
             # Восстанавливаем кнопку
             self.connect_button.config(state="normal")
+            logger.debug("Кнопка подключения восстановлена")
 
     def run(self):
         self.root.mainloop()
@@ -282,6 +316,48 @@ class Main:
         color = "red" if error else "black"
         self.status_label.config(text=message, foreground=color)
         self.root.update_idletasks()
+        # Логируем сообщение
+        if error:
+            logger.error(message)
+        else:
+            logger.info(message)
+    
+    def show_history(self):
+        """Открывает окно с историей действий из лог-файла"""
+        history_window = tk.Toplevel(self.root)
+        history_window.title("История действий")
+        history_window.geometry("800x500")
+        
+        # Устанавливаем окно как модальное
+        history_window.transient(self.root)
+        history_window.grab_set()
+        
+        # Создаем текстовое поле для отображения истории
+        history_text = tk.Text(history_window, wrap=tk.WORD, font=("Courier", 10))
+        history_text.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        
+        # Добавляем скроллбар
+        scrollbar = ttk.Scrollbar(history_text, command=history_text.yview)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        history_text.config(yscrollcommand=scrollbar.set)
+        
+        # Загружаем содержимое лог-файла
+        try:
+            with open('logs/app.log', 'r', encoding='utf-8') as file:
+                log_content = file.read()
+                history_text.insert(tk.END, log_content)
+                history_text.config(state=tk.DISABLED)  # Делаем только для чтения
+        except FileNotFoundError:
+            history_text.insert(tk.END, "История еще не создана.")
+            history_text.config(state=tk.DISABLED)
+        
+        # Кнопка закрытия
+        close_button = ttk.Button(
+            history_window,
+            text="Закрыть",
+            command=history_window.destroy
+        )
+        close_button.pack(pady=10)
 
 
     def check_connection(self):
@@ -695,6 +771,23 @@ class Main:
 
     def send_km_data(self, product_group, type_of_use, json_file, token):
         """Обрабатывает отправку данных КМ."""
+        # Проверка входных данных
+        if not product_group:
+            messagebox.showerror("Ошибка", "Выберите товарную группу")
+            return
+            
+        if not type_of_use:
+            messagebox.showerror("Ошибка", "Выберите тип использования")
+            return
+            
+        if not json_file:
+            messagebox.showerror("Ошибка", "Выберите JSON файл с данными")
+            return
+            
+        if not token:
+            messagebox.showerror("Ошибка", "Выберите устройство")
+            return
+            
         # Список для хранения штрих-кодов и даты
         sntins = []
         date_manufacture = None
@@ -728,29 +821,78 @@ class Main:
 
         # Чтение JSON файла
         try:
+            logger.info(f"Начата отправка КМ. Товарная группа: {product_group}, Тип использования: {type_of_use}")
+            
             with open(json_file, 'r', encoding='utf-8') as file:
                 data = json.load(file)
                 # Запускаем рекурсивную функцию
                 extract_data(data)
+                
+            # Валидация извлеченных данных
+            if not sntins:
+                logger.error("Не найдены штрих-коды в файле JSON")
+                raise Exception("Не найдены штрих-коды (sntins) в файле JSON")
+                
+            if not date_manufacture:
+                logger.error("Не найдена дата производства в файле JSON")
+                raise Exception("Не найдена дата производства (DateManufacture) в файле JSON")
+                
+            if not date_expiration:
+                logger.error("Не найдена дата истечения срока в файле JSON")
+                raise Exception("Не найдена дата истечения срока (DateExpiration) в файле JSON")
+                
+            if not claim_number:
+                logger.error("Не найден номер заявки в файле JSON")
+                raise Exception("Не найден номер заявки (ClaimNumber) в файле JSON")
+                
+            if not name_product:
+                logger.error("Не найдено название продукта в файле JSON")
+                raise Exception("Не найдено название продукта (NameProduct) в файле JSON")
+                
+            # Проверка формата дат
+            try:
+                datetime.strptime(date_manufacture, "%Y.%m.%d")
+                datetime.strptime(date_expiration, "%Y.%m.%d")
+            except ValueError:
+                logger.error("Неверный формат даты в файле JSON")
+                raise Exception("Неверный формат даты. Требуемый формат: ГГГГ.ММ.ДД")
 
             extension = self.client_db.get_product_group_code_by_name(product_group)
-            token = self.client_db.get_device_token(token)
-            if not extension or not token:
-                raise Exception("Не удалось получить код товарной группы или токен устройства.")
+            device_token = self.client_db.get_device_token(token)
+            
+            if not extension:
+                logger.error(f"Не найден код для товарной группы: {product_group}")
+                raise Exception(f"Не удалось получить код товарной группы: {product_group}")
+                
+            if not device_token:
+                logger.error(f"Не найден токен для устройства: {token}")
+                raise Exception(f"Не удалось получить токен устройства: {token}")
+                
+            usage_type = self.client_db.get_type_of_use_code_by_name(type_of_use)
+            if not usage_type:
+                logger.error(f"Не найден код для типа использования: {type_of_use}")
+                raise Exception(f"Не удалось получить код типа использования: {type_of_use}")
 
-            json_data = dict()
-            json_data["sntins"] = sntins
-            json_data["usageType"] = self.client_db.get_type_of_use_code_by_name(type_of_use)
-            json_data["brandcode"] = name_product
-            json_data["productionDate"] = datetime.strptime(date_manufacture, "%Y.%m.%d").isoformat()+"Z"
-            json_data["expirationDate"] = datetime.strptime(date_expiration, "%Y.%m.%d").isoformat()+"Z"
-            json_data["seriesNumber"] = claim_number
-            result = self.legacy_api_client.send_mark(json_data, extension, token)
+            json_data = {
+                "sntins": sntins,
+                "usageType": usage_type,
+                "brandcode": name_product,
+                "productionDate": datetime.strptime(date_manufacture, "%Y.%m.%d").isoformat()+"Z",
+                "expirationDate": datetime.strptime(date_expiration, "%Y.%m.%d").isoformat()+"Z",
+                "seriesNumber": claim_number
+            }
+            
+            logger.info(f"Отправка данных КМ. Количество штрих-кодов: {len(sntins)}")
+            result = self.legacy_api_client.send_mark(json_data, extension, device_token)
+            
             if result == 200:
+                logger.info("Данные КМ успешно отправлены")
                 messagebox.showinfo("Успех", "Данные успешно отправлены!")
-        except (FileNotFoundError, json.JSONDecodeError):
+        except (FileNotFoundError, json.JSONDecodeError) as e:
+            logger.error(f"Ошибка при чтении JSON файла: {str(e)}")
             messagebox.showerror("Ошибка", "Ошибка при загрузке JSON файла, проверьте формат или путь.")
         except Exception as e:
+            logger.error(f"Ошибка отправки данных КМ: {str(e)}", exc_info=True)
             messagebox.showerror("Ошибка", f"Ошибка отправки данных: {str(e)}")
 
 

@@ -1,0 +1,4 @@
+
+requests>=2.32.3
+tkcalendar>=1.6.1
+websocket-client>=1.7.0
