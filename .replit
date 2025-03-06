@@ -8,6 +8,7 @@ channel = "stable-24_05"
 run = ["sh", "-c", "run"]
 
 [workflows]
+runButton = "crpt-turon"
 
 [[workflows.workflow]]
 name = "crpt-turon"
